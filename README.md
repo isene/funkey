@@ -6,7 +6,7 @@
 
 ![Rust](https://img.shields.io/badge/language-Rust-orange) ![Unlicense](https://img.shields.io/badge/license-Unlicense-green) ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-blue) ![Stay Amazing](https://img.shields.io/badge/Stay-Amazing-important)
 
-A game draws pixels into a frame and reads keys. funkey runs the loop at a fixed rate and shows the frame in the terminal. Every cell holds two pixels in full colour, so a 160 by 50 terminal is a 160 by 100 pixel screen. Only the cells that changed are sent. Where a terminal can show real pixels, a later backend will. Part of the [Fe₂O₃ Rust terminal suite](https://github.com/isene/fe2o3).
+A game draws pixels into a frame and reads keys. funkey runs the loop at a fixed rate and shows the frame in the terminal. That is half blocks, or real pixels where the terminal has the kitty graphics protocol. Every cell holds two pixels in full colour, so a 160 by 50 terminal is a 160 by 100 pixel screen. Only the cells that changed are sent. Where a terminal can show real pixels, a later backend will. Part of the [Fe₂O₃ Rust terminal suite](https://github.com/isene/fe2o3).
 
 The first game on it is `climb`, a Jumpman-style platformer:
 
@@ -40,7 +40,7 @@ impl Game for Ball {
         if self.y < 0.0 || self.y > 96.0 { self.vy = -self.vy; }
         Flow::Continue
     }
-    fn draw(&self, f: &mut Frame) {
+    fn draw(&mut self, f: &mut Frame) {
         f.clear(0x102030);
         f.rect(self.x as i32, self.y as i32, 4, 4, 0xffcc00);
     }
@@ -51,14 +51,27 @@ fn main() {
 }
 ```
 
+## Doom
+
+The second renderer draws Doom levels along the level's own BSP tree, front to back:
+- sectors with a floor and a ceiling, textured walls between them,
+- flats read with one perspective division per pixel,
+- things as sprites against a depth buffer,
+- light from the sector and the distance.
+ A frame of Freedoom's first map takes about a millisecond at 320 by 240.
+
+```bash
+cargo run --release --example doom            # ~/.funkey/freedoom1.wad, its first map
+cargo run --release --example doom -- ~/.funkey/freedoom2.wad MAP03
+```
+
+Arrows turn and walk, A and D sidestep, Space opens a door, Q quits. Freedoom is free: [freedoom.github.io](https://freedoom.github.io/), drop the WADs in `~/.funkey/`. Doom, Heretic and Hexen WADs load the same way; monsters, weapons and the rest of the game are still to come.
+
 ## Where it is going
 
-Three renderers on the same frame:
-- tiles and sprites for platformers,
-- sectors and portals walking a BSP for Doom-style games,
-- a software 3D rasterizer for driving games.
-
-Pixel output through the terminal's graphics protocol where it has one. Sound.
+- Monsters, weapons, pickups and the exit switch on the Doom renderer.
+- A software 3D rasterizer for driving games.
+- Sound.
 
 ## Using it
 

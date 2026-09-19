@@ -32,6 +32,7 @@ pub struct Screen {
     scaled: Frame,
     out: String,
     rgba: Vec<u8>,
+    big: bool,
 }
 
 impl Screen {
@@ -42,7 +43,7 @@ impl Screen {
             Ok("kitty") => Backend::Kitty,
             _ => Backend::HalfBlocks,
         };
-        let mut s = Screen { backend, cols: 0, rows: 0, w: 0, h: 0, last: Vec::new(), scaled: Frame::new(1, 1), out: String::new(), rgba: Vec::new() };
+        let mut s = Screen { backend, cols: 0, rows: 0, w: 0, h: 0, last: Vec::new(), scaled: Frame::new(1, 1), out: String::new(), rgba: Vec::new(), big: false };
         s.resize();
         s
     }
@@ -120,6 +121,7 @@ impl Screen {
         let cols = ((frame.w as f32 * fit) as i32).clamp(1, self.cols);
         let rows = ((frame.h as f32 * fit / 2.0) as i32).clamp(1, self.rows);
         let (ox, oy) = ((self.cols - cols) / 2, (self.rows - rows) / 2);
+        self.big = cols * rows * 2 > self.cols * self.rows;
         self.out.clear();
         self.out.push_str(&Cursor::at(ox as u16 + 1, oy as u16 + 1));
         self.out.push_str(&glow::kitty_frame_rgb(1, frame.w as u32, frame.h as u32, cols as u16, rows as u16, &self.rgba));
@@ -127,6 +129,10 @@ impl Screen {
         let _ = so.write_all(self.out.as_bytes());
         let _ = so.flush();
     }
+
+    /// True when real pixels cover more than half the window, where a
+    /// lower frame rate saves the display server real work.
+    pub fn big(&self) -> bool { self.backend == Backend::Kitty && self.big }
 
     /// Nearest-neighbour scaling into the display, keeping the frame's
     /// shape, black around it.

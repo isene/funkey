@@ -19,7 +19,7 @@
 //!         if self.y < 0.0 || self.y > 96.0 { self.vy = -self.vy; }
 //!         Flow::Continue
 //!     }
-//!     fn draw(&self, f: &mut Frame) {
+//!     fn draw(&mut self, f: &mut Frame) {
 //!         f.clear(0x102030);
 //!         f.rect(self.x as i32, self.y as i32, 4, 4, 0xffcc00);
 //!     }
@@ -30,12 +30,14 @@
 //! }
 //! ```
 
+pub mod doom;
 pub mod font;
 pub mod frame;
 pub mod input;
 pub mod screen;
 pub mod sprite;
 pub mod tilemap;
+pub mod wad;
 
 pub use frame::{parts, rgb, Frame, Rgb, BLACK, WHITE};
 pub use input::{Input, Key};
@@ -64,8 +66,9 @@ impl Default for Config {
 pub trait Game {
     /// Advance the game by `dt` seconds with the keys as they are.
     fn update(&mut self, input: &Input, dt: f32) -> Flow;
-    /// Draw the game into the frame.
-    fn draw(&self, frame: &mut Frame);
+    /// Draw the game into the frame. Mutable, so a renderer may keep
+    /// its scratch buffers in the game.
+    fn draw(&mut self, frame: &mut Frame);
 }
 
 /// Run the game until it asks to quit. Updates happen at the configured
@@ -91,7 +94,9 @@ pub fn run(game: &mut dyn Game, cfg: Config) {
         }
         if updates > 0 {
             game.draw(&mut frame);
-            screen.present(&frame);
+            // Real pixels over a whole window cost the display server a
+            // scale pass per frame; 30 a second is plenty there.
+            if !(screen.big() && ticks % 2 == 1) { screen.present(&frame); }
             if let Some(p) = &shot { if ticks % 30 == 0 { let _ = std::fs::write(p, frame.to_ppm()); } }
         }
         let now = Instant::now();

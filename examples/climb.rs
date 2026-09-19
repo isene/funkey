@@ -163,7 +163,7 @@ impl Game for Climb {
         Flow::Continue
     }
 
-    fn draw(&self, f: &mut Frame) {
+    fn draw(&mut self, f: &mut Frame) {
         f.clear(if self.flash > 0.0 { 0x5a1a1a } else { SKY });
         for ty in 0..self.map.h {
             for tx in 0..self.map.w {
