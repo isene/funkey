@@ -173,12 +173,13 @@ impl Raster {
         let mut v = [p0, p1, p2];
         v.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
         let (t, m, b) = (v[0], v[1], v[2]);
-        if b.1 - t.1 < 0.5 { return; }
-        let y0 = (t.1.ceil() as i32).max(0);
-        let y1 = (b.1.ceil() as i32 - 1).min(self.h - 1);
+        // A pixel belongs to the triangle when its centre does, so two
+        // triangles sharing an edge share no pixel and leave no gap.
+        let y0 = ((t.1 - 0.5).ceil() as i32).max(0);
+        let y1 = ((b.1 - 0.5).ceil() as i32 - 1).min(self.h - 1);
         // Interpolate x and 1/z down both edges.
         let edge = |a: (f32, f32, f32), c: (f32, f32, f32), y: f32| {
-            let s = ((y - a.1) / (c.1 - a.1)).clamp(0.0, 1.0);
+            let s = if c.1 - a.1 > 1e-6 { ((y - a.1) / (c.1 - a.1)).clamp(0.0, 1.0) } else { 1.0 };
             (a.0 + (c.0 - a.0) * s, 1.0 / a.2 + (1.0 / c.2 - 1.0 / a.2) * s)
         };
         for y in y0..=y1 {
@@ -186,8 +187,8 @@ impl Raster {
             let (xa, za) = edge(t, b, yc);
             let (xb, zb) = if yc < m.1 { edge(t, m, yc) } else { edge(m, b, yc) };
             let ((xl, zl), (xr, zr)) = if xa < xb { ((xa, za), (xb, zb)) } else { ((xb, zb), (xa, za)) };
-            let x0 = (xl.ceil() as i32).max(0);
-            let x1 = (xr.ceil() as i32 - 1).min(self.w - 1);
+            let x0 = ((xl - 0.5).ceil() as i32).max(0);
+            let x1 = ((xr - 0.5).ceil() as i32 - 1).min(self.w - 1);
             if x0 > x1 { continue; }
             let row = (y * self.w) as usize;
             for x in x0..=x1 {
@@ -253,6 +254,22 @@ mod tests {
         let cam = Cam3 { pos: V3::new(0.0, 0.0, 0.0), yaw: 0.0, pitch: -0.3, focal: 64.0 };
         let below = cam.view().apply(V3::new(0.0, -6.0, 20.0));
         assert!(below.y.abs() < 2.0, "a point below and ahead comes to the centre: {:?}", below);
+    }
+
+    #[test]
+    fn two_triangles_sharing_an_edge_leave_no_gap() {
+        let mut f = Frame::new(40, 40);
+        let mut r = Raster::new(40, 40);
+        let cam = Cam3 { pos: V3::new(0.0, 0.0, 0.0), yaw: 0.0, pitch: 0.0, focal: 40.0 };
+        let mut m = Mesh::new();
+        // A wall of stacked quads straight ahead, with fractional edges.
+        for i in 0..6 {
+            let (y0, y1) = (-3.0 + i as f32 * 1.07, -3.0 + (i + 1) as f32 * 1.07);
+            m.quad(V3::new(3.0, y0, 5.0), V3::new(-3.0, y0, 5.0), V3::new(-3.0, y1, 5.0), V3::new(3.0, y1, 5.0), 0x00ff00);
+        }
+        r.draw(&mut f, &m, &M4::identity(), &cam);
+        let holes = (5..35).filter(|&y| f.get(20, y) == 0).count();
+        assert_eq!(holes, 0, "rows through the wall must all be painted");
     }
 
     #[test]

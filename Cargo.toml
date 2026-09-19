@@ -1,6 +1,6 @@
 [package]
 name = "fe2o3-funkey"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2021"
 description = "A game engine for the terminal: pixels as half blocks or real pixels, held keys, a fixed-step loop, sprites, tiles, platformer physics, sound, a Doom renderer and a 3D rasterizer"
 license = "Unlicense"
