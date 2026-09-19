@@ -1,0 +1,20 @@
+[package]
+name = "fe2o3-funkey"
+version = "0.1.0"
+edition = "2021"
+description = "A game engine for the terminal: a pixel framebuffer, held keys, a fixed-step loop, sprites, tiles and platformer physics"
+license = "Unlicense"
+repository = "https://github.com/isene/funkey"
+authors = ["Geir Isene <g@isene.com>"]
+
+[lib]
+name = "funkey"
+
+[dependencies]
+crust = { version = "0.1", path = "../crust", package = "fe2o3-crust" }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
