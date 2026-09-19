@@ -60,6 +60,8 @@ struct Doom {
     texture_order: Vec<String>,
     flat_order: Vec<String>,
     dead_tics: i32,
+    /// Sounds played, by tic: the sound track of a scripted run.
+    sound_log: Option<Vec<(i32, String, f32)>>,
 }
 
 fn texture_names(wad: &Wad) -> Vec<String> {
@@ -96,7 +98,7 @@ impl Doom {
         let hud = Hud::load(&wad);
         let sound = Sound::new(&wad, sound_on);
         Ok(Doom { wad, art, renderer: Renderer::new(W, VIEW_H), world, hud, sound, screen: Screen::Title, automap: false,
-            map_scale: 0.09, typed: String::new(), skill, texture_order, flat_order, dead_tics: 0 })
+            map_scale: 0.09, typed: String::new(), skill, texture_order, flat_order, dead_tics: 0, sound_log: None })
     }
 
     fn load_level(&mut self, name: &str, keep: bool) -> Result<(), String> {
@@ -110,14 +112,20 @@ impl Doom {
         Ok(())
     }
 
+    fn play(&mut self, name: &str, vol: f32) {
+        if let Some(log) = &mut self.sound_log { log.push((self.world.tic, name.to_string(), vol)); }
+        self.sound.play(name, vol);
+    }
+
     fn drain_sounds(&mut self) {
         let (px, py) = (self.world.player.x, self.world.player.y);
-        for (name, at) in self.world.sounds.drain(..) {
+        let sounds: Vec<_> = self.world.sounds.drain(..).collect();
+        for (name, at) in sounds {
             let vol = match at {
                 None => 1.0,
                 Some((x, y)) => ((1200.0 - ((x - px).powi(2) + (y - py).powi(2)).sqrt()) / 1000.0).clamp(0.0, 1.0),
             };
-            if vol > 0.0 { self.sound.play(name, vol); }
+            if vol > 0.0 { self.play(name, vol); }
         }
     }
 
@@ -287,6 +295,7 @@ impl Game for Doom {
             }
             Screen::Inter(_) => {
                 let mut next_level: Option<Option<String>> = None;
+                let mut to_play: Vec<(&str, f32)> = Vec::new();
                 if let Screen::Inter(inter) = &mut self.screen {
                     inter.tics += 1;
                     let targets = [inter.kills, inter.items, inter.secrets, inter.time];
@@ -294,22 +303,23 @@ impl Game for Doom {
                     if stage < 3 {
                         if inter.tics & 1 == 0 {
                             inter.shown[stage] = (inter.shown[stage] + 2).min(targets[stage]);
-                            if inter.shown[stage] < targets[stage] { self.sound.play("PISTOL", 0.6); }
-                            else if inter.tics > 20 { self.sound.play("BAREXP", 0.8); inter.stage += 1; inter.tics = 0; }
+                            if inter.shown[stage] < targets[stage] { to_play.push(("PISTOL", 0.6)); }
+                            else if inter.tics > 20 { to_play.push(("BAREXP", 0.8)); inter.stage += 1; inter.tics = 0; }
                         }
                     } else if stage == 3 {
                         inter.shown[3] = (inter.shown[3] + 3).min(targets[3]);
-                        if inter.shown[3] < targets[3] { if inter.tics & 3 == 0 { self.sound.play("PISTOL", 0.6); } }
-                        else if inter.tics > 20 { self.sound.play("BAREXP", 0.8); inter.stage = 4; inter.tics = 0; }
+                        if inter.shown[3] < targets[3] { if inter.tics & 3 == 0 { to_play.push(("PISTOL", 0.6)); } }
+                        else if inter.tics > 20 { to_play.push(("BAREXP", 0.8)); inter.stage = 4; inter.tics = 0; }
                     }
                     if input.any_pressed() && inter.tics > 8 {
                         match inter.stage {
-                            0..=3 => { inter.shown = targets; inter.stage = 4; inter.tics = 0; self.sound.play("BAREXP", 0.8); }
-                            4 => { inter.stage = 5; inter.tics = 0; self.sound.play("SGCOCK", 0.8); }
+                            0..=3 => { inter.shown = targets; inter.stage = 4; inter.tics = 0; to_play.push(("BAREXP", 0.8)); }
+                            4 => { inter.stage = 5; inter.tics = 0; to_play.push(("SGCOCK", 0.8)); }
                             _ => next_level = Some(inter.next.clone()),
                         }
                     }
                 }
+                for (n, v) in to_play { self.play(n, v); }
                 if let Some(next) = next_level {
                     match next {
                         Some(name) => match self.load_level(&name, true) {
@@ -355,8 +365,10 @@ fn script_key(name: &str) -> Option<Key> {
 /// Run a key script with no terminal, then say where things stand.
 fn scripted(game: &mut Doom, script: &str) {
     let mut input = Input::new();
-    game.screen = Screen::Play;
+    game.screen = if std::env::var_os("DOOM_TITLE").is_some() { Screen::Title } else { Screen::Play };
+    game.sound_log = Some(Vec::new());
     let mut frame = Frame::new(W, H);
+    let mut frames_written = 0u32;
     for item in script.split(',') {
         let (name, n) = item.split_once('*').unwrap_or((item, "1"));
         let n: i32 = n.trim().parse().unwrap_or(1);
@@ -386,16 +398,21 @@ fn scripted(game: &mut Doom, script: &str) {
             if let Some(k) = key { input.inject(k); }
             if game.update(&input, 1.0 / 35.0) == Flow::Quit { break; }
             if let Ok(every) = std::env::var("DOOM_SHOT_EVERY") {
-                let n: i32 = every.parse().unwrap_or(35);
-                if n > 0 && game.world.tic % n == 0 {
+                let n: u32 = every.parse().unwrap_or(35);
+                frames_written += 1;
+                if n > 0 && frames_written % n == 0 {
                     game.draw(&mut frame);
-                    let _ = std::fs::write(format!("{}-{}.ppm", std::env::var("DOOM_SHOT").unwrap_or("shot".into()), game.world.tic), frame.to_ppm());
+                    let _ = std::fs::write(format!("{}-{:06}.ppm", std::env::var("DOOM_SHOT").unwrap_or("shot".into()), frames_written / n), frame.to_ppm());
                 }
             }
         }
     }
     game.draw(&mut frame);
     if let Ok(p) = std::env::var("DOOM_SHOT") { let _ = std::fs::write(p, frame.to_ppm()); }
+    if let (Ok(p), Some(log)) = (std::env::var("DOOM_WAV"), &game.sound_log) {
+        if let Err(e) = game.sound.render_wav(log, &p) { eprintln!("doom: {}: {}", p, e); }
+        eprintln!("{} sounds in the track", log.len());
+    }
     let w = &game.world;
     let p = &w.player;
     let alive = w.mobjs.iter().filter(|m| !m.removed && m.kind == world::Kind::Monster && m.health > 0 && m.flags & world::F_COUNTKILL != 0).count();

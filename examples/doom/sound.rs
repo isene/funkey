@@ -46,6 +46,28 @@ impl Sound {
         Sound { tx, child, lumps }
     }
 
+    /// Mix a list of (tic, name, volume) into a WAV file: the sound track
+    /// of a scripted run.
+    pub fn render_wav(&self, events: &[(i32, String, f32)], path: &str) -> std::io::Result<()> {
+        let last = events.iter().map(|e| e.0).max().unwrap_or(0) as usize + 70;
+        let mut mix = vec![0.0f32; last * RATE as usize / 35];
+        for (tic, name, vol) in events {
+            let Some(d) = self.lumps.get(name) else { continue };
+            let at = *tic as usize * RATE as usize / 35;
+            for (k, &s) in d.iter().enumerate() {
+                if let Some(m) = mix.get_mut(at + k) { *m += (s as f32 - 128.0) * vol; }
+            }
+        }
+        let mut out = Vec::with_capacity(44 + mix.len());
+        let n = mix.len() as u32;
+        out.extend_from_slice(b"RIFF"); out.extend_from_slice(&(36 + n).to_le_bytes()); out.extend_from_slice(b"WAVEfmt ");
+        out.extend_from_slice(&16u32.to_le_bytes()); out.extend_from_slice(&1u16.to_le_bytes()); out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&RATE.to_le_bytes()); out.extend_from_slice(&RATE.to_le_bytes()); out.extend_from_slice(&1u16.to_le_bytes()); out.extend_from_slice(&8u16.to_le_bytes());
+        out.extend_from_slice(b"data"); out.extend_from_slice(&n.to_le_bytes());
+        out.extend(mix.iter().map(|m| (m.clamp(-128.0, 127.0) + 128.0) as u8));
+        std::fs::write(path, out)
+    }
+
     pub fn play(&self, name: &str, vol: f32) {
         let Some(tx) = &self.tx else { return };
         let Some(d) = self.lumps.get(name) else { return };
