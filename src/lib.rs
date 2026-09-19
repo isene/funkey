@@ -47,6 +47,14 @@ pub use tilemap::{Body, Tilemap};
 
 use std::time::{Duration, Instant};
 
+/// Where `FUNKEY_DEBUG` notes go: ~/.funkey/debug.log.
+pub fn debug_path() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    let dir = std::path::PathBuf::from(home).join(".funkey");
+    let _ = std::fs::create_dir_all(&dir);
+    dir.join("debug.log")
+}
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Flow { Continue, Quit }
 
