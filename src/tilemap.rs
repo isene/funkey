@@ -55,6 +55,27 @@ impl Tilemap {
         (0..self.h).flat_map(|y| (0..self.w).map(move |x| (x, y))).filter(|&(x, y)| self.at(x, y) == c).collect()
     }
 
+    /// The tiles a view of (view_w, view_h) pixels at camera (cam_x, cam_y)
+    /// can see, as (pixel x, pixel y, character) with the camera taken off.
+    pub fn visible(&self, view_w: i32, view_h: i32, cam_x: i32, cam_y: i32) -> Vec<(i32, i32, char)> {
+        let t = self.tile;
+        let (tx0, ty0) = ((cam_x.div_euclid(t)).max(0), (cam_y.div_euclid(t)).max(0));
+        let (tx1, ty1) = (((cam_x + view_w) / t + 1).min(self.w), ((cam_y + view_h) / t + 1).min(self.h));
+        let mut out = Vec::with_capacity(((tx1 - tx0).max(0) * (ty1 - ty0).max(0)) as usize);
+        for ty in ty0..ty1 { for tx in tx0..tx1 {
+            let c = self.at(tx, ty);
+            if c != ' ' { out.push((tx * t - cam_x, ty * t - cam_y, c)); }
+        } }
+        out
+    }
+
+    /// Draw the map with a sprite per character.
+    pub fn draw(&self, f: &mut crate::frame::Frame, cam_x: i32, cam_y: i32, tiles: &[(char, &crate::sprite::Sprite)]) {
+        for (px, py, c) in self.visible(f.w, f.h, cam_x, cam_y) {
+            if let Some((_, s)) = tiles.iter().find(|(k, _)| *k == c) { f.blit(s, px, py); }
+        }
+    }
+
     /// Pixel size of the whole map.
     pub fn pixel_w(&self) -> i32 { self.w * self.tile }
     pub fn pixel_h(&self) -> i32 { self.h * self.tile }

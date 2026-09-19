@@ -1,8 +1,8 @@
 [package]
 name = "fe2o3-funkey"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2021"
-description = "A game engine for the terminal: a pixel framebuffer, held keys, a fixed-step loop, sprites, tiles and platformer physics"
+description = "A game engine for the terminal: pixels as half blocks or real pixels, held keys, a fixed-step loop, sprites, tiles, platformer physics, sound, a Doom renderer and a 3D rasterizer"
 license = "Unlicense"
 repository = "https://github.com/isene/funkey"
 authors = ["Geir Isene <g@isene.com>"]
@@ -13,6 +13,7 @@ name = "funkey"
 [dependencies]
 crust = { version = "0.1.54", path = "../crust", package = "fe2o3-crust" }
 glow  = { version = "0.1.28", path = "../glow", package = "fe2o3-glow" }
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 [profile.release]
 opt-level = 3

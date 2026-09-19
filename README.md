@@ -18,13 +18,16 @@ Arrows or WASD move, Space jumps, Up and Down climb a ladder, R restarts, Q quit
 
 ## What the engine gives a game
 
-- **Frame**: a pixel framebuffer with rectangles, lines, sprites and a built-in 3 by 5 font.
-- **wad and doom**: Doom's WAD files, with their pictures, textures, flats, sprites, palettes and levels.
-- The sector renderer draws a level and the sprites a game hands it.
-- **Sprite**: rows of characters and a palette, so a game needs no image files. Transparent pixels, flipping.
-- **Input**: keys with a held state. Where the terminal reports key releases (glass, kitty), a key is held from its press to its release. Elsewhere it counts as held while its repeats keep coming. `pressed` for the tick a key went down, `axis_x` and `axis_y` for movement, `inject` to feed keys from a script.
-- **Tilemap and Body**: levels as lines of text, solid and one-way tiles. Boxes fall, run and stop at walls, one axis at a time.
-- **run**: a fixed-step loop at the frame rate you ask for. The frame is scaled to the terminal by whole numbers and centred.
+- **Frame**: a pixel framebuffer with rectangles, lines, circles, sprites, two built-in fonts at any scale, and a dim for overlays.
+- **Sprite**: rows of characters and a palette, or a PNG file cut into a sheet. Flipping, scaling, tinting.
+- **Input**: keys with a held state. Where the terminal reports releases (glass, kitty), a key is held from press to release. `pressed` for the tick a key went down, `axis_x` and `axis_y` for movement.
+- **Tilemap and Body**: levels as lines of text, solid and one-way tiles, drawn with a camera. Boxes fall, run and stop at walls.
+- **Audio**: samples mixed in the engine and piped to pw-play, paplay or aplay. WAV files, Doom lumps, or made on the spot: tones, slides, noise, and tunes written as notes. Channels that loop, change volume and pitch while they play.
+- **Particles**: bursts of sparks that fly, fall and fade.
+- **Raster**: a software 3D rasterizer. Meshes of flat-shaded triangles, a camera, a depth buffer, fog.
+- **wad and doom**: Doom's WAD files, and the sector renderer that draws a level and the sprites a game hands it.
+- **Rng and store**: seeded random numbers, and high scores kept under `~/.funkey/`.
+- **run**: a fixed-step loop at the frame rate you ask for. The frame is scaled to the terminal and centred. With `FUNKEY_SCRIPT` set, the same loop runs with no terminal and writes frames, for tests and films.
 
 A game is a type with two methods:
 
@@ -51,6 +54,19 @@ impl Game for Ball {
 fn main() {
     run(&mut Ball { x: 10.0, y: 10.0, vx: 60.0, vy: 40.0 }, Config { width: 160, height: 100, fps: 60 });
 }
+```
+
+## The games
+
+Three examples come with the engine:
+
+- `climb`: a small Jumpman-style platformer, 200 lines. Ladders, coins, blobs.
+- `jumpman`: a Jumpman Junior kind of game. Five levels of girders, ladders and ropes. Bombs to collect, bullets to jump, robots to dodge. A fall from too high is the end of you. Some bombs reveal ladders or take girders away. A title tune, a high score.
+- `drive`: a car on a road over rolling hills, on the 3D rasterizer. Go fast, leave the road, regret it.
+
+```bash
+cargo run --release --example jumpman
+cargo run --release --example drive
 ```
 
 ## Doom
@@ -93,8 +109,8 @@ writes the last frame. `DOOM_BENCH=1` times the renderer.
 ## Where it is going
 
 - Heretic and Hexen: their WADs load, their monsters and weapons do not yet exist.
-- A software 3D rasterizer for driving games.
-- Music, once there is a small enough synthesizer.
+- Textured triangles and a mesh loader for the rasterizer.
+- Music for Doom from its MUS lumps.
 
 ## Using it
 
@@ -103,7 +119,9 @@ writes the last frame. `DOOM_BENCH=1` times the renderer.
 funkey = { version = "0.1", package = "fe2o3-funkey" }
 ```
 
-Set `FUNKEY_PIXELS=kitty` to draw real pixels through the kitty graphics protocol instead of half blocks, in a terminal that has it. Set `FUNKEY_SHOT=/tmp/shot.ppm` to have the engine write the frame to a file twice a second, for screenshots and tests.
+Set `FUNKEY_PIXELS=kitty` to draw real pixels through the kitty graphics protocol instead of half blocks, in a terminal that has it. Set `FUNKEY_SHOT=/tmp/shot.ppm` to have the engine write the frame to a file twice a second, for screenshots and tests. `FUNKEY_SOUND=0` keeps it quiet.
+
+`FUNKEY_SCRIPT="right*60,space,-*30"` runs a game with no terminal, feeding those keys for that many ticks, and writes the last frame to `FUNKEY_SHOT`. With `FUNKEY_SHOT_EVERY=1` every frame is written; ffmpeg makes a film of them.
 
 ## License
 

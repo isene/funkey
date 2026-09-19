@@ -30,17 +30,26 @@
 //! }
 //! ```
 
+pub mod audio;
 pub mod doom;
 pub mod font;
 pub mod frame;
 pub mod input;
+pub mod particles;
+pub mod raster;
+pub mod rng;
 pub mod screen;
 pub mod sprite;
+pub mod store;
 pub mod tilemap;
 pub mod wad;
 
+pub use audio::{Audio, Sample, Tune, Wave};
 pub use frame::{parts, rgb, Frame, Rgb, BLACK, WHITE};
 pub use input::{Input, Key};
+pub use particles::Particles;
+pub use raster::{Cam3, Mesh, Raster, M4, V3};
+pub use rng::Rng;
 pub use screen::Screen;
 pub use sprite::Sprite;
 pub use tilemap::{Body, Tilemap};
@@ -81,7 +90,13 @@ pub trait Game {
 
 /// Run the game until it asks to quit. Updates happen at the configured
 /// rate; a slow frame is caught up with extra updates, at most a few.
+///
+/// With `FUNKEY_SCRIPT` set, no terminal is touched: the keys in the
+/// script are fed for the given ticks (`"right*60,space*5,-*30"`) and
+/// the last frame goes to `FUNKEY_SHOT` as a PPM, or every frame when
+/// `FUNKEY_SHOT_EVERY` is set.
 pub fn run(game: &mut dyn Game, cfg: Config) {
+    if let Ok(script) = std::env::var("FUNKEY_SCRIPT") { return run_script(game, cfg, &script); }
     let mut screen = Screen::open();
     let mut input = Input::new();
     input.set_exact(crust::Crust::supports_key_release());
@@ -111,4 +126,40 @@ pub fn run(game: &mut dyn Game, cfg: Config) {
         let now = Instant::now();
         if next > now { std::thread::sleep((next - now).min(step)); }
     }
+}
+
+fn script_key(name: &str) -> Option<Key> {
+    Some(match name {
+        "up" => Key::Up, "down" => Key::Down, "left" => Key::Left, "right" => Key::Right, "space" => Key::Space,
+        "enter" => Key::Enter, "tab" => Key::Tab, "esc" => Key::Escape, "back" => Key::Backspace,
+        "-" | "none" => return None,
+        s if s.chars().count() == 1 => Key::Char(s.chars().next()?),
+        _ => return None,
+    })
+}
+
+fn run_script(game: &mut dyn Game, cfg: Config, script: &str) {
+    let mut input = Input::new();
+    let mut frame = Frame::new(cfg.width, cfg.height);
+    let dt = 1.0 / cfg.fps.max(1) as f32;
+    let shot = std::env::var("FUNKEY_SHOT").ok();
+    let every: u32 = std::env::var("FUNKEY_SHOT_EVERY").ok().and_then(|e| e.parse().ok()).unwrap_or(0);
+    let mut n = 0u32;
+    'outer: for item in script.split(',') {
+        let (name, count) = item.trim().split_once('*').unwrap_or((item.trim(), "1"));
+        let key = script_key(name);
+        input.release_all();
+        for _ in 0..count.trim().parse::<u32>().unwrap_or(1) {
+            input.clear_pressed();
+            if let Some(k) = key { input.inject(k); }
+            if game.update(&input, dt) == Flow::Quit { break 'outer; }
+            n += 1;
+            if every > 0 && n % every == 0 {
+                game.draw(&mut frame);
+                if let Some(p) = &shot { let _ = std::fs::write(format!("{}-{:06}.ppm", p, n / every), frame.to_ppm()); }
+            }
+        }
+    }
+    game.draw(&mut frame);
+    if let Some(p) = shot { let _ = std::fs::write(p, frame.to_ppm()); }
 }

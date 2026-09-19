@@ -18,7 +18,6 @@ mod ai;
 mod hud;
 mod info;
 mod player;
-mod sound;
 mod specials;
 mod world;
 
@@ -28,7 +27,7 @@ use funkey::*;
 use hud::{Hud, Inter};
 use info::WEAPONS;
 use player::{PW_BERSERK, PW_INVULN, PW_MAP, PW_SUIT, PW_VISOR, WEAPONBOTTOM};
-use sound::Sound;
+use funkey::audio::{Audio, Sample};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -45,13 +44,31 @@ const VIEW_H: i32 = 202;
 
 enum Screen { Title, Play, Inter(Inter), End }
 
+/// The WAD's sound effects on the engine's mixer.
+struct Sounds { audio: Audio, lumps: HashMap<String, Sample> }
+
+impl Sounds {
+    fn new(wad: &Wad, audio: Audio) -> Sounds {
+        let mut lumps = HashMap::new();
+        for l in &wad.lumps {
+            if !l.name.starts_with("DS") { continue; }
+            if let Some(s) = Sample::from_doom(&l.data) { lumps.insert(l.name[2..].to_string(), s); }
+        }
+        Sounds { audio, lumps }
+    }
+
+    fn play(&mut self, name: &str, vol: f32) {
+        if let Some(s) = self.lumps.get(name) { self.audio.play(s, vol); }
+    }
+}
+
 struct Doom {
     wad: Wad,
     art: Art,
     renderer: Renderer,
     world: World,
     hud: Hud,
-    sound: Sound,
+    sound: Sounds,
     screen: Screen,
     automap: bool,
     map_scale: f32,
@@ -60,8 +77,6 @@ struct Doom {
     texture_order: Vec<String>,
     flat_order: Vec<String>,
     dead_tics: i32,
-    /// Sounds played, by tic: the sound track of a scripted run.
-    sound_log: Option<Vec<(i32, String, f32)>>,
 }
 
 fn texture_names(wad: &Wad) -> Vec<String> {
@@ -86,7 +101,7 @@ fn flat_names(wad: &Wad) -> Vec<String> {
 }
 
 impl Doom {
-    fn new(wad_path: &PathBuf, map: Option<String>, skill: u8, sound_on: bool) -> Result<Doom, String> {
+    fn new(wad_path: &PathBuf, map: Option<String>, skill: u8, audio: Audio) -> Result<Doom, String> {
         let wad = Wad::open(wad_path)?;
         let map = map.unwrap_or_else(|| wad.lumps.iter().map(|l| l.name.as_str()).find(|n| is_map_name(n)).unwrap_or("E1M1").to_string());
         let art = Art::load(&wad);
@@ -96,9 +111,9 @@ impl Doom {
         let level = Level::load(&wad, &map)?;
         let world = World::new(level, texture_order.clone(), flat_order.clone(), skill);
         let hud = Hud::load(&wad);
-        let sound = Sound::new(&wad, sound_on);
+        let sound = Sounds::new(&wad, audio);
         Ok(Doom { wad, art, renderer: Renderer::new(W, VIEW_H), world, hud, sound, screen: Screen::Title, automap: false,
-            map_scale: 0.09, typed: String::new(), skill, texture_order, flat_order, dead_tics: 0, sound_log: None })
+            map_scale: 0.09, typed: String::new(), skill, texture_order, flat_order, dead_tics: 0 })
     }
 
     fn load_level(&mut self, name: &str, keep: bool) -> Result<(), String> {
@@ -112,10 +127,7 @@ impl Doom {
         Ok(())
     }
 
-    fn play(&mut self, name: &str, vol: f32) {
-        if let Some(log) = &mut self.sound_log { log.push((self.world.tic, name.to_string(), vol)); }
-        self.sound.play(name, vol);
-    }
+    fn play(&mut self, name: &str, vol: f32) { self.sound.play(name, vol); }
 
     fn drain_sounds(&mut self) {
         let (px, py) = (self.world.player.x, self.world.player.y);
@@ -366,7 +378,6 @@ fn script_key(name: &str) -> Option<Key> {
 fn scripted(game: &mut Doom, script: &str) {
     let mut input = Input::new();
     game.screen = if std::env::var_os("DOOM_TITLE").is_some() { Screen::Title } else { Screen::Play };
-    game.sound_log = Some(Vec::new());
     let mut frame = Frame::new(W, H);
     let mut frames_written = 0u32;
     for item in script.split(',') {
@@ -397,6 +408,7 @@ fn scripted(game: &mut Doom, script: &str) {
             input.clear_pressed();
             if let Some(k) = key { input.inject(k); }
             if game.update(&input, 1.0 / 35.0) == Flow::Quit { break; }
+            game.sound.audio.set_time(game.world.tic as f32 / 35.0);
             if let Ok(every) = std::env::var("DOOM_SHOT_EVERY") {
                 let n: u32 = every.parse().unwrap_or(35);
                 frames_written += 1;
@@ -409,9 +421,8 @@ fn scripted(game: &mut Doom, script: &str) {
     }
     game.draw(&mut frame);
     if let Ok(p) = std::env::var("DOOM_SHOT") { let _ = std::fs::write(p, frame.to_ppm()); }
-    if let (Ok(p), Some(log)) = (std::env::var("DOOM_WAV"), &game.sound_log) {
-        if let Err(e) = game.sound.render_wav(log, &p) { eprintln!("doom: {}: {}", p, e); }
-        eprintln!("{} sounds in the track", log.len());
+    if let Ok(p) = std::env::var("DOOM_WAV") {
+        if let Err(e) = game.sound.audio.write_wav(&p) { eprintln!("doom: {}: {}", p, e); }
     }
     let w = &game.world;
     let p = &w.player;
@@ -448,7 +459,8 @@ fn main() {
     });
     let map = args.get(1).cloned();
     let script = std::env::var("DOOM_SCRIPT").ok();
-    let mut game = match Doom::new(&wad, map, skill, sound_on && script.is_none() && shot.is_none()) {
+    let audio = if script.is_some() { Audio::recorder() } else if sound_on && shot.is_none() { Audio::open() } else { Audio::off() };
+    let mut game = match Doom::new(&wad, map, skill, audio) {
         Ok(g) => g,
         Err(e) => { eprintln!("doom: {}", e); std::process::exit(1); }
     };
