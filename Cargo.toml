@@ -1,6 +1,6 @@
 [package]
 name = "fe2o3-funkey"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "A game engine for the terminal: a pixel framebuffer, held keys, a fixed-step loop, sprites, tiles and platformer physics"
 license = "Unlicense"
@@ -12,7 +12,7 @@ name = "funkey"
 
 [dependencies]
 crust = { version = "0.1", path = "../crust", package = "fe2o3-crust" }
-glow  = { version = "0.1.27", path = "../glow", package = "fe2o3-glow" }
+glow  = { version = "0.1.28", path = "../glow", package = "fe2o3-glow" }
 
 [profile.release]
 opt-level = 3

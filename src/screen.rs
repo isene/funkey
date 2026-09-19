@@ -8,7 +8,8 @@
 //!   down to fit.
 //! - Real pixels through the kitty graphics protocol, where the terminal
 //!   has it: the whole frame goes out every time and the terminal scales
-//!   it to the window. `FUNKEY_PIXELS=kitty` picks this.
+//!   it to the window. `FUNKEY_PIXELS=kitty` picks this. Inside glass the
+//!   pixels travel over shared memory; elsewhere as base64.
 
 use crate::frame::{parts, Frame, Rgb, BLACK};
 use crust::cursor::{seq, Cursor};
@@ -108,10 +109,10 @@ impl Screen {
     /// stretched over the cells that keep the frame's shape.
     fn present_pixels(&mut self, frame: &Frame) {
         self.rgba.clear();
-        self.rgba.reserve((frame.w * frame.h * 4) as usize);
+        self.rgba.reserve((frame.w * frame.h * 3) as usize);
         for &p in &frame.px {
             let (r, g, b) = parts(p);
-            self.rgba.extend_from_slice(&[r, g, b, 255]);
+            self.rgba.extend_from_slice(&[r, g, b]);
         }
         // Cells are about twice as tall as wide: a frame of w by h pixels
         // keeps its shape over w by h/2 cells, scaled to fit the window.
@@ -121,7 +122,7 @@ impl Screen {
         let (ox, oy) = ((self.cols - cols) / 2, (self.rows - rows) / 2);
         self.out.clear();
         self.out.push_str(&Cursor::at(ox as u16 + 1, oy as u16 + 1));
-        self.out.push_str(&glow::kitty_frame(1, frame.w as u32, frame.h as u32, cols as u16, rows as u16, &self.rgba));
+        self.out.push_str(&glow::kitty_frame_rgb(1, frame.w as u32, frame.h as u32, cols as u16, rows as u16, &self.rgba));
         let mut so = std::io::stdout();
         let _ = so.write_all(self.out.as_bytes());
         let _ = so.flush();
