@@ -66,7 +66,7 @@ impl Game for Drive {
         self.speed -= self.speed * (if on_road { 0.12 } else { 0.9 }) * dt;
         self.speed = self.speed.clamp(0.0, top);
         let steer = (input.held(Key::Right) as i32 - input.held(Key::Left) as i32) as f32;
-        self.heading -= steer * 1.4 * dt * (self.speed / 40.0).clamp(0.25, 1.0);
+        self.heading += steer * 1.4 * dt * (self.speed / 40.0).clamp(0.25, 1.0);
         self.heading *= 1.0 - 0.6 * dt;
         self.x += self.heading.sin() * self.speed * dt;
         self.z += self.heading.cos() * self.speed * dt;
