@@ -10,7 +10,7 @@
   <meta property="og:title" content="funkey - a game engine for the terminal">
   <meta property="og:description" content="Doom, Jumpman, Space Invaders and a driving game, in the terminal, in Rust.">
   <meta property="og:type" content="website">
-  <meta property="og:image" content="img/doom.png">
+  <meta property="og:image" content="img/soar.png">
   <style>
     .card .shot { width: 100%; display: block; border-radius: 8px; margin: 0 0 0.9rem; image-rendering: pixelated; image-rendering: crisp-edges; border: 1px solid rgba(255,255,255,0.08); }
     .card pre { margin: 0.8rem 0 0; padding: 0.55rem 0.8rem; font-size: 0.82rem; background: rgba(0,0,0,0.35); border-radius: 6px; overflow-x: auto; }
@@ -100,13 +100,31 @@
     <div class="container">
       <h2>The games</h2>
       <p class="section-intro">
-        Five games come with the engine. Each has its own version, shown on its
+        Six games come with the engine. Each has its own version, shown on its
         title screen and tagged in the repo; the crate version is the engine's.
         Every one runs with <code>cargo run --release --example &lt;name&gt;</code>,
         and with <code>FUNKEY_PIXELS=kitty</code> in glass or kitty for real pixels.
       </p>
 
       <div class="grid">
+        <div class="card">
+          <img class="shot" src="img/soar.png" alt="soar: mountains, water and clouds under a low sun">
+          <div class="card-head">
+            <div>
+              <h3 class="card-title"><a class="card-link" href="https://github.com/isene/funkey/blob/master/examples/soar.rs">soar</a></h3>
+              <div class="card-kind">A flight over fractal mountains</div>
+              <div class="card-version">soar-v1.0</div>
+            </div>
+          </div>
+          <p class="card-desc">
+            A height map ray-cast a column at a time, the way Comanche did it,
+            with the sun and its shadows baked in, haze, water that glitters, and
+            clouds drifting over. The autopilot flies; take the controls when you
+            like. There is nothing to win, only to look at.
+          </p>
+          <pre><span class="cmd">cargo run --release --example soar</span></pre>
+        </div>
+
         <div class="card">
           <img class="shot" src="img/doom.png" alt="Doom: a zombie approaches down a corridor, the pistol raised">
           <div class="card-head">
