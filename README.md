@@ -62,7 +62,7 @@ Four games come with the engine, and Doom below:
 
 - `climb`: a small Jumpman-style platformer, 200 lines. Ladders, coins, blobs.
 - `jumpman`: a Jumpman Junior kind of game. Five levels of girders, ladders and ropes. Bombs to collect, bullets to jump, robots to dodge. A fall from too high is the end of you. Some bombs reveal ladders or take girders away. A title tune, a high score.
-- `invaders`: fifty-five of them, marching down. Shields crumble where they are hit, the march quickens as the rows thin, a mystery ship crosses the top, each wave starts lower.
+- `invaders`: fifty-five of them, marching down. Shields crumble where they are hit. The march quickens as the rows thin, a mystery ship crosses the top, each wave starts lower.
 - `drive`: a car on a winding road over the hills, on the 3D rasterizer. Fetch the packages before the clock runs out, then more of them with less time. An arrow points at the nearest. Go fast, leave the road, regret it.
 
 ```bash
