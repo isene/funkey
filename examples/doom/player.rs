@@ -48,6 +48,8 @@ pub struct Player {
     pub hurt_tics: i32, pub hurt_dir: i32, pub rampage: i32,
     pub backpack: bool,
     pub level_time: i32,
+    /// Tics a turn key has been held: the first few turn slowly.
+    pub turn_held: i32,
 }
 
 impl Player {
@@ -66,7 +68,7 @@ impl Player {
             damage_count: 0, bonus_count: 0, extra_light: 0, kills: 0, items: 0, secrets: 0,
             god: false, noclip: false, message: String::new(), message_tics: 0, reaction: 0,
             look_idx: 0, look_tics: 0, ouch_tics: 0, evil_tics: 0, hurt_tics: 0, hurt_dir: 0, rampage: 0,
-            backpack: false, level_time: 0,
+            backpack: false, level_time: 0, turn_held: 0,
         }
     }
 
@@ -135,11 +137,15 @@ fn powers(w: &mut World) {
 }
 
 fn movement(w: &mut World, input: &Input) {
-    let turn = 7f32.to_radians();
     let p = &mut w.player;
     if p.reaction == 0 {
-        if input.tapped(Key::Left) { p.angle += 10f32.to_radians(); }
-        if input.tapped(Key::Right) { p.angle -= 10f32.to_radians(); }
+        // Doom's turn: slow for the first six tics a key is held, so a
+        // tap aims, then fast.
+        let turning = input.motion(Key::Left) || input.motion(Key::Right);
+        if turning { p.turn_held += 1; } else { p.turn_held = 0; }
+        let turn = if p.turn_held <= 6 { 1.76f32.to_radians() } else { 7f32.to_radians() };
+        if input.tapped(Key::Left) { p.angle += 3.5f32.to_radians(); }
+        if input.tapped(Key::Right) { p.angle -= 3.5f32.to_radians(); }
         if input.motion(Key::Left) { p.angle += turn; }
         if input.motion(Key::Right) { p.angle -= turn; }
         let (fx, fy) = (p.angle.cos(), p.angle.sin());
