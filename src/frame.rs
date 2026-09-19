@@ -55,6 +55,20 @@ impl Frame {
         }
     }
 
+    /// A straight line between two points.
+    pub fn line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, c: Rgb) {
+        let (dx, dy) = ((x1 - x0).abs(), -(y1 - y0).abs());
+        let (sx, sy) = (if x0 < x1 { 1 } else { -1 }, if y0 < y1 { 1 } else { -1 });
+        let (mut x, mut y, mut err) = (x0, y0, dx + dy);
+        loop {
+            self.put(x, y, c);
+            if x == x1 && y == y1 { break; }
+            let e2 = 2 * err;
+            if e2 >= dy { err += dy; x += sx; }
+            if e2 <= dx { err += dx; y += sy; }
+        }
+    }
+
     pub fn hline(&mut self, x: i32, y: i32, w: i32, c: Rgb) { self.rect(x, y, w, 1, c); }
     pub fn vline(&mut self, x: i32, y: i32, h: i32, c: Rgb) { self.rect(x, y, 1, h, c); }
 

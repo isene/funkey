@@ -19,8 +19,10 @@ Arrows or WASD move, Space jumps, Up and Down climb a ladder, R restarts, Q quit
 ## What the engine gives a game
 
 - **Frame**: a pixel framebuffer with rectangles, lines, sprites and a built-in 3 by 5 font.
+- **wad and doom**: Doom's WAD files, with their pictures, textures, flats, sprites, palettes and levels.
+- The sector renderer draws a level and the sprites a game hands it.
 - **Sprite**: rows of characters and a palette, so a game needs no image files. Transparent pixels, flipping.
-- **Input**: keys with a held state. Where the terminal reports key releases (glass, kitty), a key is held from its press to its release; elsewhere it counts as held while its repeats keep coming. `pressed` for the tick a key went down, `axis_x` and `axis_y` for movement.
+- **Input**: keys with a held state. Where the terminal reports key releases (glass, kitty), a key is held from its press to its release. Elsewhere it counts as held while its repeats keep coming. `pressed` for the tick a key went down, `axis_x` and `axis_y` for movement, `inject` to feed keys from a script.
 - **Tilemap and Body**: levels as lines of text, solid and one-way tiles. Boxes fall, run and stop at walls, one axis at a time.
 - **run**: a fixed-step loop at the frame rate you ask for. The frame is scaled to the terminal by whole numbers and centred.
 
@@ -53,25 +55,46 @@ fn main() {
 
 ## Doom
 
-The second renderer draws Doom levels along the level's own BSP tree, front to back:
-- sectors with a floor and a ceiling, textured walls between them,
-- flats read with one perspective division per pixel,
-- things as sprites against a depth buffer,
-- light from the sector and the distance.
- A frame of Freedoom's first map takes about a millisecond at 320 by 240.
+The second game is Doom itself, on funkey's sector renderer: the level
+drawn along its own BSP tree, front to back, monsters as sprites against
+a depth buffer, light from the sector and the distance. A frame of
+Freedoom's first map takes about a millisecond at 320 by 240.
 
 ```bash
 cargo run --release --example doom            # ~/.funkey/freedoom1.wad, its first map
 cargo run --release --example doom -- ~/.funkey/freedoom2.wad MAP03
+cargo run --release --example doom -- --skill 4 --no-sound
 ```
 
-Arrows turn and walk, A and D sidestep, Space opens a door, Q quits. Freedoom is free: [freedoom.github.io](https://freedoom.github.io/), drop the WADs in `~/.funkey/`. Doom, Heretic and Hexen WADs load the same way; monsters, weapons and the rest of the game are still to come.
+What is in:
+- every monster from Doom and Doom II, with Doom's own frame timings,
+- their sight, chase, melee and ranged attacks, pain, death and gibs,
+- the pain elemental's souls, the revenant's homing rockets, the mancubus spread, the arch-vile's fire,
+- all nine weapons with their flashes, ammo and auto-aim; the BFG's spray; the berserk fist,
+- health, armour, keys, backpacks, the messages,
+- the powers: invulnerability, invisibility, the suit, the map, the visor,
+- doors and locked doors, lifts, floors, ceilings, crushers, stairs,
+- teleports, switches and their textures, exits and secret exits,
+- light effects, animated flats and walls, damage floors, secrets,
+- the status bar with the face, the automap, palette flashes,
+- the intermission with kills, items, secrets and time, and the next map,
+- sound effects from the WAD, mixed and piped to pw-play, paplay or aplay. No music.
+
+Arrows turn and walk, W and S too, A and D sidestep, Space fires, E or
+Enter uses, 1 to 7 pick a weapon, Tab shows the map (- and = zoom), Escape
+quits. The old cheats work: iddqd, idkfa, idfa, idclip, idclev, idbehold,
+iddt. Freedoom is free: [freedoom.github.io](https://freedoom.github.io/),
+drop the WADs in `~/.funkey/`. Doom's own WADs load the same way.
+
+For a test without a terminal, `DOOM_SCRIPT="up*70,space*30"` runs those
+keys for that many tics and prints where things stand; `DOOM_SHOT=out.ppm`
+writes the last frame. `DOOM_BENCH=1` times the renderer.
 
 ## Where it is going
 
-- Monsters, weapons, pickups and the exit switch on the Doom renderer.
+- Heretic and Hexen: their WADs load, their monsters and weapons do not yet exist.
 - A software 3D rasterizer for driving games.
-- Sound.
+- Music, once there is a small enough synthesizer.
 
 ## Using it
 

@@ -69,6 +69,25 @@ impl Input {
     /// True when the terminal reports key releases, so `held` is exact.
     pub fn exact(&self) -> bool { self.exact }
 
+    /// True on a tick when any key went down.
+    pub fn any_pressed(&self) -> bool { !self.pressed.is_empty() }
+
+    /// Feed a key from outside the terminal: held this tick, and pressed
+    /// unless it was already down. For scripted runs and tests.
+    pub fn inject(&mut self, key: Key) {
+        let now = Instant::now();
+        if !self.held.contains_key(&key) { self.pressed.push(key); }
+        self.held.insert(key, Held { last: now, repeats: 1 });
+        self.exact = true;
+    }
+
+    /// Forget this tick's presses, keeping what is held: the start of a
+    /// scripted tick.
+    pub fn clear_pressed(&mut self) { self.pressed.clear(); }
+
+    /// Let go of every key fed with `inject`.
+    pub fn release_all(&mut self) { self.held.clear(); self.pressed.clear(); }
+
     /// Tell the input up front that the terminal reports releases, so
     /// the first press is not held on a timer while it waits to learn.
     pub fn set_exact(&mut self, exact: bool) { self.exact = self.exact || exact; }

@@ -6,7 +6,26 @@
 //! through the WAD's colour maps.
 
 use crate::frame::Frame;
-use crate::wad::{Art, Level, Picture, Sector, Seg, Thing, ML_DONTPEGBOTTOM, ML_DONTPEGTOP, NF_SUBSECTOR, NO_PIXEL};
+use crate::wad::{Art, Level, Picture, Seg, ML_DONTPEGBOTTOM, ML_DONTPEGTOP, NF_SUBSECTOR, NO_PIXEL};
+
+/// A sprite the game wants drawn: something standing at a spot, showing
+/// one frame of one sprite.
+#[derive(Clone, Copy, Debug)]
+pub struct Vis {
+    pub x: f32,
+    pub y: f32,
+    /// The sprite's origin, absolute: the feet of a monster.
+    pub z: f32,
+    /// Which way it faces, for sprites with rotations.
+    pub angle: f32,
+    pub sprite: [u8; 4],
+    /// The frame letter, `b'A'` on.
+    pub frame: u8,
+    /// Lit in full whatever the sector light: fireballs, muzzle flashes.
+    pub bright: bool,
+    /// Drawn as a shimmer: spectres, a player with partial invisibility.
+    pub fuzzy: bool,
+}
 
 const NEAR: f32 = 0.5;
 const EYE: f32 = 41.0;
@@ -73,6 +92,12 @@ pub struct Renderer {
     fx: f32, fy: f32, rx: f32, ry: f32,
     angle: f32,
     sky: String,
+    /// Lines drawn so far, by linedef: what an automap has seen.
+    pub seen: Vec<bool>,
+    /// One colour map for everything: 32 for invulnerability, 0 for a light visor.
+    pub fixed: Option<usize>,
+    /// Steps of extra brightness, from a muzzle flash.
+    pub extra_light: i32,
 }
 
 impl Renderer {
@@ -81,11 +106,12 @@ impl Renderer {
             w, h, focal: w as f32 / 2.0, focal_y: w as f32 / 2.0 * 1.2,
             ceil_clip: vec![-1; w as usize], floor_clip: vec![h; w as usize], zbuf: vec![f32::INFINITY; (w * h) as usize],
             open: w, cx: 0.0, cy: 0.0, cz: 0.0, fx: 1.0, fy: 0.0, rx: 0.0, ry: -1.0, angle: 0.0, sky: "SKY1".into(),
+            seen: Vec::new(), fixed: None, extra_light: 0,
         }
     }
 
-    /// Draw the level as seen from the camera.
-    pub fn render(&mut self, level: &Level, art: &Art, cam: &Camera, frame: &mut Frame) {
+    /// Draw the level as seen from the camera, then the sprites.
+    pub fn render(&mut self, level: &Level, art: &Art, cam: &Camera, frame: &mut Frame, vis: &[Vis]) {
         self.ceil_clip.fill(-1);
         self.floor_clip.fill(self.h);
         self.zbuf.fill(f32::INFINITY);
@@ -94,10 +120,15 @@ impl Renderer {
         self.fx = cam.angle.cos(); self.fy = cam.angle.sin();
         self.rx = self.fy; self.ry = -self.fx;
         self.sky = sky_for(&level.name);
+        if self.seen.len() != level.linedefs.len() { self.seen = vec![false; level.linedefs.len()]; }
         let root = (level.nodes.len() - 1) as u16;
         self.walk(level, art, frame, root);
-        self.things(level, art, frame);
+        self.sprites(level, art, frame, vis);
     }
+
+    /// The colour map for something right in front of the camera in a
+    /// sector of the given light: the weapon in hand.
+    pub fn light_for(&self, light: i32) -> usize { self.light_index(light, 0.0) }
 
     fn walk(&mut self, level: &Level, art: &Art, frame: &mut Frame, id: u16) {
         if self.open <= 0 { return; }
@@ -127,8 +158,9 @@ impl Renderer {
     }
 
     fn light_index(&self, light: i32, depth: f32) -> usize {
+        if let Some(f) = self.fixed { return f; }
         let base = ((255 - light.clamp(0, 255)) / 8) as f32;
-        (base + depth / 160.0).clamp(0.0, 31.0) as usize
+        (base + depth / 160.0 - self.extra_light as f32 * 2.0).clamp(0.0, 31.0) as usize
     }
 
     fn seg(&mut self, level: &Level, art: &Art, frame: &mut Frame, seg: &Seg) {
@@ -163,6 +195,7 @@ impl Renderer {
         let xa = (px1.ceil() as i32).max(0);
         let xb = ((px2.ceil() as i32) - 1).min(self.w - 1);
         if xa > xb { return; }
+        self.seen[seg.linedef] = true;
 
         // Textures and pegging.
         let sky_ceiling = front.ceiling_flat == "F_SKY1";
@@ -330,41 +363,42 @@ impl Renderer {
         }
     }
 
-    /// Things as sprites, tested per pixel against the depth buffer.
-    fn things(&mut self, level: &Level, art: &Art, frame: &mut Frame) {
-        let mut seen: Vec<(f32, &Thing)> = level.things.iter()
-            .filter(|t| t.kind != 1 && t.kind != 2 && t.kind != 3 && t.kind != 4 && t.kind != 11 && t.flags & 16 == 0 && t.flags & 2 != 0)
-            .filter_map(|t| { let (d, _) = self.view(t.x, t.y); if d > NEAR { Some((d, t)) } else { None } })
+    /// Sprites, far to near, tested per pixel against the depth buffer.
+    fn sprites(&mut self, level: &Level, art: &Art, frame: &mut Frame, vis: &[Vis]) {
+        let mut seen: Vec<(f32, f32, &Vis)> = vis.iter()
+            .filter_map(|v| { let (d, side) = self.view(v.x, v.y); if d > NEAR { Some((d, side, v)) } else { None } })
             .collect();
         seen.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        for (depth, t) in seen {
-            let Some((name, fr)) = sprite_of(t.kind) else { continue };
-            // Rotation as seen from the camera: 1 faces us.
-            let to_cam = (self.cy - t.y).atan2(self.cx - t.x);
-            let rel = (to_cam - t.angle).rem_euclid(std::f32::consts::TAU);
+        let w = self.w as usize;
+        for (depth, side, v) in seen {
+            // Rotation as seen from the camera: 1 faces us, then clockwise.
+            let to_cam = (self.cy - v.y).atan2(self.cx - v.x);
+            let rel = (to_cam - v.angle).rem_euclid(std::f32::consts::TAU);
             let rot = (((rel + std::f32::consts::PI / 8.0) / (std::f32::consts::PI / 4.0)) as u8 % 8) + 1;
-            let Some((pic, mirror)) = art.sprite(name, fr, rot) else { continue };
-            let sector: &Sector = &level.sectors[level.sector_at(t.x, t.y)];
-            let (_, side) = self.view(t.x, t.y);
+            let Some((pic, mirror)) = art.sprite(&v.sprite, v.frame, rot) else { continue };
             let sx = self.w as f32 / 2.0 + side * self.focal / depth;
             let scale = self.focal / depth;
             let scale_y = self.focal_y / depth;
             let left = sx - pic.left as f32 * scale;
-            let bottom = self.row_of(sector.floor, depth);
-            let top = bottom - pic.h as f32 * scale_y;
+            // The picture's top offset says how far above the origin it starts.
+            let top = self.row_of(v.z + pic.top as f32, depth);
+            let bottom = top + pic.h as f32 * scale_y;
             let x0 = (left.round() as i32).max(0);
             let x1 = ((left + pic.w as f32 * scale).round() as i32 - 1).min(self.w - 1);
             let y0 = (top.round() as i32).max(0);
             let y1 = (bottom.round() as i32 - 1).min(self.h - 1);
             if x0 > x1 || y0 > y1 { continue; }
-            let cm = &art.colormaps[self.light_index(sector.light, depth)];
-            let w = self.w as usize;
+            let light = if let Some(f) = self.fixed { f } else if v.bright { 0 } else if v.fuzzy { 6 } else {
+                self.light_index(level.sectors[level.sector_at(v.x, v.y)].light, depth)
+            };
+            let cm = &art.colormaps[light.min(art.colormaps.len() - 1)];
             for x in x0..=x1 {
                 let mut tx = ((x as f32 + 0.5 - left) / scale) as i32;
                 if mirror { tx = pic.w - 1 - tx; }
                 if tx < 0 || tx >= pic.w { continue; }
                 let col = &pic.px[(tx * pic.h) as usize..((tx + 1) * pic.h) as usize];
                 for y in y0..=y1 {
+                    if v.fuzzy && (x + y) & 1 == 0 { continue; }
                     let ty = ((y as f32 + 0.5 - top) / scale_y) as i32;
                     if ty < 0 || ty >= pic.h { continue; }
                     let c = col[ty as usize];
@@ -376,6 +410,30 @@ impl Renderer {
                     }
                 }
             }
+        }
+    }
+}
+
+/// Draw a WAD picture into the frame with its top-left corner at (x, y),
+/// scaled by `sx` and `sy`, through a colour map when one is given. For
+/// the weapon in hand, the status bar, menus: nothing checks depth.
+#[allow(clippy::too_many_arguments)]
+pub fn blit_pic(frame: &mut Frame, art: &Art, pic: &Picture, x: f32, y: f32, sx: f32, sy: f32, cm: Option<&[u8; 256]>) {
+    let x0 = (x.round() as i32).max(0);
+    let y0 = (y.round() as i32).max(0);
+    let x1 = ((x + pic.w as f32 * sx).round() as i32).min(frame.w);
+    let y1 = ((y + pic.h as f32 * sy).round() as i32).min(frame.h);
+    for px in x0..x1 {
+        let tx = ((px as f32 + 0.5 - x) / sx) as i32;
+        if tx < 0 || tx >= pic.w { continue; }
+        let col = &pic.px[(tx * pic.h) as usize..((tx + 1) * pic.h) as usize];
+        for py in y0..y1 {
+            let ty = ((py as f32 + 0.5 - y) / sy) as i32;
+            if ty < 0 || ty >= pic.h { continue; }
+            let c = col[ty as usize];
+            if c == NO_PIXEL { continue; }
+            let c = cm.map(|m| m[c as usize]).unwrap_or(c);
+            frame.px[(py * frame.w + px) as usize] = art.palette[c as usize];
         }
     }
 }

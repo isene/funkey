@@ -59,10 +59,22 @@ impl Wad {
 
     /// The 256-colour palette as 0xRRGGBB.
     pub fn palette(&self) -> Vec<u32> {
+        self.palettes().into_iter().next().unwrap_or_else(|| vec![0; 256])
+    }
+
+    /// All the palettes in PLAYPAL: the plain one, then the red pain
+    /// shades, the yellow pickup shades and the green suit tint.
+    pub fn palettes(&self) -> Vec<Vec<u32>> {
         let p = self.lump("PLAYPAL").unwrap_or(&[]);
-        (0..256).map(|i| if p.len() >= (i + 1) * 3 {
-            ((p[i * 3] as u32) << 16) | ((p[i * 3 + 1] as u32) << 8) | p[i * 3 + 2] as u32
-        } else { 0 }).collect()
+        (0..p.len() / 768).map(|n| (0..256).map(|i| {
+            let a = n * 768 + i * 3;
+            ((p[a] as u32) << 16) | ((p[a + 1] as u32) << 8) | p[a + 2] as u32
+        }).collect()).collect()
+    }
+
+    /// A picture lump by name, such as STBAR or TITLEPIC.
+    pub fn picture(&self, name: &str) -> Option<Picture> {
+        self.lump(name).and_then(Picture::from_patch)
     }
 
     /// 34 colour maps of 256 entries: light levels from bright to dark.
@@ -134,16 +146,23 @@ impl Picture {
 
 /// Everything a level's walls, floors and things are drawn with.
 pub struct Art {
+    /// The palette in use; one of `palettes`.
     pub palette: Vec<u32>,
+    pub palettes: Vec<Vec<u32>>,
     pub colormaps: Vec<[u8; 256]>,
     pub textures: HashMap<String, Picture>,
     pub flats: HashMap<String, Picture>,
-    pub sprites: HashMap<String, Picture>,
+    /// Sprite pictures, found through `frames`.
+    pub sprite_pics: Vec<Picture>,
+    /// Sprite name and frame letter to the picture for each of the
+    /// eight rotations, with whether it is drawn mirrored.
+    pub frames: HashMap<[u8; 5], [Option<(u32, bool)>; 8]>,
 }
 
 impl Art {
     pub fn load(wad: &Wad) -> Art {
-        let palette = wad.palette();
+        let palettes = wad.palettes();
+        let palette = palettes.first().cloned().unwrap_or_else(|| vec![0; 256]);
         let colormaps = wad.colormaps();
         // Patches by name, through PNAMES.
         let pnames: Vec<String> = wad.lump("PNAMES").map(|p| {
@@ -200,28 +219,42 @@ impl Art {
         for i in wad.between("F_START", "F_END").into_iter().chain(wad.between("FF_START", "FF_END")) {
             if let Some(p) = Picture::from_flat(&wad.lumps[i].data) { flats.insert(wad.lumps[i].name.clone(), p); }
         }
-        let mut sprites = HashMap::new();
+        let mut sprite_pics = Vec::new();
+        let mut frames: HashMap<[u8; 5], [Option<(u32, bool)>; 8]> = HashMap::new();
         for i in wad.between("S_START", "S_END").into_iter().chain(wad.between("SS_START", "SS_END")) {
-            if let Some(p) = Picture::from_patch(&wad.lumps[i].data) { sprites.insert(wad.lumps[i].name.clone(), p); }
+            let n = wad.lumps[i].name.as_bytes();
+            if n.len() != 6 && n.len() != 8 { continue; }
+            let Some(p) = Picture::from_patch(&wad.lumps[i].data) else { continue };
+            let id = sprite_pics.len() as u32;
+            sprite_pics.push(p);
+            let mut set = |frame: u8, rot: u8, mirror: bool| {
+                let mut key = [0u8; 5];
+                key[..4].copy_from_slice(&n[..4]);
+                key[4] = frame;
+                let slots = frames.entry(key).or_insert([None; 8]);
+                if rot == b'0' { for s in slots.iter_mut() { if s.is_none() { *s = Some((id, mirror)); } } }
+                else if (b'1'..=b'8').contains(&rot) { slots[(rot - b'1') as usize] = Some((id, mirror)); }
+            };
+            set(n[4], n[5], false);
+            if n.len() == 8 { set(n[6], n[7], true); }
         }
-        Art { palette, colormaps, textures, flats, sprites }
+        Art { palette, palettes, colormaps, textures, flats, sprite_pics, frames }
     }
 
-    /// The sprite lump for a four-letter name, frame letter and rotation
-    /// (1..8), with mirrored lumps such as `TROOA2A8` taken into account.
-    /// Returns the picture and whether to mirror it.
-    pub fn sprite(&self, name: &str, frame: char, rotation: u8) -> Option<(&Picture, bool)> {
-        let plain = format!("{}{}0", name, frame);
-        if let Some(p) = self.sprites.get(&plain) { return Some((p, false)); }
-        let exact = format!("{}{}{}", name, frame, rotation);
-        if let Some(p) = self.sprites.get(&exact) { return Some((p, false)); }
-        for (n, p) in &self.sprites {
-            if n.len() == 8 && n.starts_with(name) && &n[4..5] == frame.to_string() {
-                if n.as_bytes()[5] == b'0' + rotation { return Some((p, false)); }
-                if n.as_bytes()[6] == frame as u8 && n.as_bytes()[7] == b'0' + rotation { return Some((p, true)); }
-            }
+    /// The picture for a sprite name, frame letter and rotation (1..8),
+    /// and whether to draw it mirrored. Lumps such as `TROOA2A8` serve
+    /// two rotations, one of them mirrored.
+    pub fn sprite(&self, name: &[u8; 4], frame: u8, rotation: u8) -> Option<(&Picture, bool)> {
+        let key = [name[0], name[1], name[2], name[3], frame];
+        let (id, mirror) = self.frames.get(&key)?[(rotation.clamp(1, 8) - 1) as usize]?;
+        Some((&self.sprite_pics[id as usize], mirror))
+    }
+
+    /// Switch to palette `n`: 0 plain, 1-8 red, 9-12 yellow, 13 green.
+    pub fn use_palette(&mut self, n: usize) {
+        if let Some(p) = self.palettes.get(n.min(self.palettes.len().saturating_sub(1))) {
+            if self.palette != *p { self.palette = p.clone(); }
         }
-        None
     }
 }
 
