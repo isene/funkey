@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>funkey - a game engine for the terminal</title>
+  <meta name="description" content="funkey is a game engine for the terminal, written in Rust: pixels, sound, sprites, tiles, a 3D rasterizer and a Doom renderer. The games on it: Doom, a Jumpman Junior, Space Invaders, a driving game.">
+  <link rel="icon" href="img/funkey.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <meta property="og:title" content="funkey - a game engine for the terminal">
+  <meta property="og:description" content="Doom, Jumpman, Space Invaders and a driving game, in the terminal, in Rust.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="img/doom.png">
+  <style>
+    .card .shot { width: 100%; display: block; border-radius: 8px; margin: 0 0 0.9rem; image-rendering: pixelated; image-rendering: crisp-edges; border: 1px solid rgba(255,255,255,0.08); }
+    .card pre { margin: 0.8rem 0 0; padding: 0.55rem 0.8rem; font-size: 0.82rem; background: rgba(0,0,0,0.35); border-radius: 6px; overflow-x: auto; }
+    .card pre .cmd { color: var(--green); }
+    .card-version { font-size: 0.8rem; color: var(--fg-mute); }
+    .film { max-width: 760px; margin: 0 auto; }
+    .film video { width: 100%; border-radius: 10px; display: block; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
+    .film p { text-align: center; color: var(--fg-dim); margin-top: 0.8rem; font-size: 0.95rem; }
+    .code { max-width: 760px; margin: 1.2rem auto 0; }
+    .code pre { padding: 1rem 1.2rem; background: rgba(0,0,0,0.35); border-radius: 10px; overflow-x: auto; font-size: 0.88rem; line-height: 1.45; }
+    .code .kw { color: var(--rust-glow); }
+    .code .comment { color: var(--fg-mute); }
+  </style>
+</head>
+<body>
+
+  <header class="hero">
+    <div class="container">
+      <img src="img/funkey.svg" alt="funkey logo" class="hero-logo">
+      <h1>funkey</h1>
+      <p class="tagline">
+        A game engine for the terminal. Written in Rust.
+        A game draws pixels and reads keys; funkey does the rest.
+      </p>
+      <div class="badges">
+        <img src="https://img.shields.io/badge/language-Rust-f74c00" alt="Rust">
+        <img src="https://img.shields.io/badge/license-Unlicense-green" alt="Unlicense">
+        <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS-blue" alt="Linux | macOS">
+        <img src="https://img.shields.io/badge/Stay-Amazing-important" alt="Stay Amazing">
+      </div>
+      <div class="cta">
+        <a href="#games" class="primary">The games</a>
+        <a href="https://github.com/isene/funkey" class="secondary">GitHub</a>
+      </div>
+    </div>
+  </header>
+
+  <section id="what">
+    <div class="container">
+      <h2>What it is</h2>
+      <p class="section-intro">
+        A game is one type with two methods: <code>update</code> reads the keys
+        and moves things, <code>draw</code> paints a frame of pixels. funkey runs
+        the loop at a fixed rate and puts the frame on the terminal. That is the
+        whole contract, and Doom fits it.
+      </p>
+      <div class="features">
+        <div class="feature">
+          <h3>Pixels, two ways</h3>
+          <p>
+            Half blocks in any terminal: two pixels a cell, in full colour, only
+            the cells that changed. Real pixels through the kitty graphics protocol
+            where the terminal has it, over shared memory in
+            <a href="https://github.com/isene/chasm" style="color:var(--rust-glow)">glass</a>.
+          </p>
+        </div>
+        <div class="feature">
+          <h3>Keys that go up</h3>
+          <p>
+            A terminal never says when a key is released. glass and kitty do,
+            through the kitty keyboard protocol, so a held arrow walks and a tap
+            takes one step. Elsewhere a key counts as held while its repeats come.
+          </p>
+        </div>
+        <div class="feature">
+          <h3>Sound</h3>
+          <p>
+            A mixer in the engine, piped to pw-play, paplay or aplay. WAV files,
+            Doom lumps, or sounds made on the spot: tones, slides, noise, and tunes
+            written as notes. Channels loop and change pitch while they play.
+          </p>
+        </div>
+        <div class="feature">
+          <h3>2D, 3D and Doom</h3>
+          <p>
+            Sprites from rows of characters or PNG files, tile maps with platformer
+            physics, particles, two fonts. A software 3D rasterizer with a depth
+            buffer and fog. A WAD loader and a sector renderer that draws Doom's
+            own levels.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="games">
+    <div class="container">
+      <h2>The games</h2>
+      <p class="section-intro">
+        Five games come with the engine. Each has its own version, shown on its
+        title screen and tagged in the repo; the crate version is the engine's.
+        Every one runs with <code>cargo run --release --example &lt;name&gt;</code>,
+        and with <code>FUNKEY_PIXELS=kitty</code> in glass or kitty for real pixels.
+      </p>
+
+      <div class="grid">
+        <div class="card">
+          <img class="shot" src="img/doom.png" alt="Doom: a zombie approaches down a corridor, the pistol raised">
+          <div class="card-head">
+            <div>
+              <h3 class="card-title"><a class="card-link" href="https://github.com/isene/funkey/tree/master/examples/doom">doom</a></h3>
+              <div class="card-kind">The game, from any Doom WAD</div>
+              <div class="card-version">doom-v1.0</div>
+            </div>
+          </div>
+          <p class="card-desc">
+            Every monster from both Dooms with Doom's own frame timings, all nine
+            weapons, pickups, keys, doors, lifts, crushers, teleports, switches,
+            the status bar with the face, the automap, the intermission, the
+            sounds. Freedoom's WADs are free; Doom's own load the same way.
+          </p>
+          <pre><span class="cmd">cargo run --release --example doom</span></pre>
+        </div>
+
+        <div class="card">
+          <img class="shot" src="img/jumpman.png" alt="jumpman: girders, ladders and bombs">
+          <div class="card-head">
+            <div>
+              <h3 class="card-title"><a class="card-link" href="https://github.com/isene/funkey/blob/master/examples/jumpman.rs">jumpman</a></h3>
+              <div class="card-kind">Platformer, Jumpman Junior in spirit</div>
+              <div class="card-version">jumpman-v1.1</div>
+            </div>
+          </div>
+          <p class="card-desc">
+            Five levels of girders, ladders and ropes. Take every bomb, jump the
+            bullets, dodge the robots, and do not fall too far. One bomb reveals
+            hidden ladders, one takes girders away. A title tune, a high score.
+          </p>
+          <pre><span class="cmd">cargo run --release --example jumpman</span></pre>
+        </div>
+
+        <div class="card">
+          <img class="shot" src="img/invaders.png" alt="invaders: five rows of eleven above four shields">
+          <div class="card-head">
+            <div>
+              <h3 class="card-title"><a class="card-link" href="https://github.com/isene/funkey/blob/master/examples/invaders.rs">invaders</a></h3>
+              <div class="card-kind">Space Invaders in spirit</div>
+              <div class="card-version">invaders-v1.0</div>
+            </div>
+          </div>
+          <p class="card-desc">
+            Fifty-five of them, marching down to the four-note beat that quickens
+            as the rows thin. Shields crumble pixel by pixel from either side, a
+            mystery ship crosses the top, and each wave starts a row lower.
+          </p>
+          <pre><span class="cmd">cargo run --release --example invaders</span></pre>
+        </div>
+
+        <div class="card">
+          <img class="shot" src="img/drive.png" alt="drive: a red car on a road over green hills">
+          <div class="card-head">
+            <div>
+              <h3 class="card-title"><a class="card-link" href="https://github.com/isene/funkey/blob/master/examples/drive.rs">drive</a></h3>
+              <div class="card-kind">Driving, on the 3D rasterizer</div>
+              <div class="card-version">drive-v1.0</div>
+            </div>
+          </div>
+          <p class="card-desc">
+            A car on a winding road over the hills. Fetch the packages before the
+            clock runs out, then more of them with less time. An arrow points at
+            the nearest. Leave the road and the grass slows you.
+          </p>
+          <pre><span class="cmd">cargo run --release --example drive</span></pre>
+        </div>
+
+        <div class="card">
+          <img class="shot" src="img/climb.png" alt="climb: bricks, ladders and coins">
+          <div class="card-head">
+            <div>
+              <h3 class="card-title"><a class="card-link" href="https://github.com/isene/funkey/blob/master/examples/climb.rs">climb</a></h3>
+              <div class="card-kind">The first game, 200 lines</div>
+              <div class="card-version">climb-v1.0</div>
+            </div>
+          </div>
+          <p class="card-desc">
+            Ladders, coins, blobs. The smallest game on the engine, and the one to
+            read first when you want to write your own.
+          </p>
+          <pre><span class="cmd">cargo run --release --example climb</span></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="film">
+    <div class="container">
+      <h2>Doom, in the terminal</h2>
+      <div class="film">
+        <video src="doom.mp4" controls playsinline preload="metadata"></video>
+        <p>
+          The game's own frames and sounds, written straight to video by a
+          scripted run. Every pixel is what the terminal shows.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section id="own">
+    <div class="container">
+      <h2>Make your own</h2>
+      <p class="section-intro">
+        A bouncing ball is the whole shape of a game. Give it a name, a
+        <code>Game</code> impl, and <code>run</code> it.
+      </p>
+      <div class="code">
+<pre><span class="kw">use</span> funkey::*;
+
+<span class="kw">struct</span> Ball { x: f32, y: f32, vx: f32, vy: f32 }
+
+<span class="kw">impl</span> Game <span class="kw">for</span> Ball {
+    <span class="kw">fn</span> update(&amp;<span class="kw">mut</span> self, input: &amp;Input, dt: f32) -&gt; Flow {
+        <span class="kw">if</span> input.pressed(Key::Char('q')) { <span class="kw">return</span> Flow::Quit; }
+        self.x += self.vx * dt;
+        self.y += self.vy * dt;
+        <span class="kw">if</span> self.x &lt; 0.0 || self.x &gt; 156.0 { self.vx = -self.vx; }
+        <span class="kw">if</span> self.y &lt; 0.0 || self.y &gt; 96.0 { self.vy = -self.vy; }
+        Flow::Continue
+    }
+    <span class="kw">fn</span> draw(&amp;<span class="kw">mut</span> self, f: &amp;<span class="kw">mut</span> Frame) {
+        f.clear(0x102030);
+        f.rect(self.x <span class="kw">as</span> i32, self.y <span class="kw">as</span> i32, 4, 4, 0xffcc00);
+    }
+}
+
+<span class="kw">fn</span> main() {
+    run(&amp;<span class="kw">mut</span> Ball { x: 10.0, y: 10.0, vx: 60.0, vy: 40.0 }, Config { width: 160, height: 100, fps: 60 });
+}</pre>
+<pre><span class="comment"># Cargo.toml</span>
+[dependencies]
+funkey = { git = "https://github.com/isene/funkey", package = "fe2o3-funkey" }</pre>
+      </div>
+      <p class="section-intro" style="margin-top:1.4rem">
+        From there: <code>Sprite::from_rows</code> for art, <code>Tilemap</code>
+        and <code>Body</code> for a level that can be walked, <code>Audio</code>
+        with <code>Sample::tone</code> for a sound made of nothing,
+        <code>Raster</code> for a third dimension. With <code>FUNKEY_SCRIPT</code>
+        set, a game runs with no terminal and writes its frames, so it can be
+        tested, and filmed.
+      </p>
+    </div>
+  </section>
+
+  <footer>
+    <div class="container">
+      <p>
+        funkey is part of <a href="https://isene.github.io/fe2o3/">Fe<sub>2</sub>O<sub>3</sub></a>,
+        the Rust terminal suite, and is maintained by
+        <a href="https://isene.com">Geir Isene</a>. Public domain (Unlicense).
+      </p>
+      <p style="margin-top: 0.5rem;">
+        Source:
+        <a href="https://github.com/isene/funkey">isene/funkey</a>
+         &middot;
+        The desktop it runs on:
+        <a href="https://github.com/isene/chasm">CHasm</a>
+      </p>
+    </div>
+  </footer>
+
+</body>
+</html>
