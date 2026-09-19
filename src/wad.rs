@@ -355,7 +355,7 @@ mod tests {
         // 2 wide, 3 tall; column 0 has one post of two pixels at row 1,
         // column 1 is empty.
         let mut d = vec![2, 0, 3, 0, 0, 0, 0, 0];
-        d.extend_from_slice(&[16, 0, 0, 0, 22, 0, 0, 0]);
+        d.extend_from_slice(&[16, 0, 0, 0, 23, 0, 0, 0]);
         d.extend_from_slice(&[1, 2, 0, 7, 9, 0, 255]);
         d.extend_from_slice(&[255]);
         let p = Picture::from_patch(&d).unwrap();
