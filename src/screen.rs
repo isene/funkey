@@ -109,34 +109,27 @@ impl Screen {
     /// The frame as real pixels: one kitty image, replaced every frame,
     /// stretched over the cells that keep the frame's shape.
     fn present_pixels(&mut self, frame: &Frame) {
-        // The frame is blown up by a whole number to about the window's
-        // size here, so the terminal only has to copy. Cell size in pixels
-        // comes from the terminal; 10 by 20 when it does not say.
+        // The terminal scales the placement into the cells asked for, so
+        // the frame goes out at its own size. The cells keep the frame's
+        // shape, from the terminal's cell size in pixels (10 by 20 when it
+        // does not say).
         let (cw, ch) = glow::get_cell_size();
-        let (cw, ch) = (cw.max(1) as i32, ch.max(1) as i32);
-        // Never past the window, and never past about 2.5 million pixels
-        // a frame: beyond that the copies cost more than the picture gains.
-        let mut factor = ((self.cols * cw) / frame.w).min((self.rows * ch) / frame.h).max(1);
-        while factor > 1 && frame.w * frame.h * factor * factor > 2_500_000 { factor -= 1; }
-        let (w, h) = (frame.w * factor, frame.h * factor);
+        let (cw, ch) = (cw.max(1) as f32, ch.max(1) as f32);
         self.rgba.clear();
-        self.rgba.reserve((w * h * 3) as usize);
-        let mut line = Vec::with_capacity((w * 3) as usize);
-        for sy in 0..frame.h {
-            line.clear();
-            for &p in &frame.px[(sy * frame.w) as usize..((sy + 1) * frame.w) as usize] {
-                let (r, g, b) = parts(p);
-                for _ in 0..factor { line.extend_from_slice(&[r, g, b]); }
-            }
-            for _ in 0..factor { self.rgba.extend_from_slice(&line); }
+        self.rgba.reserve((frame.w * frame.h * 3) as usize);
+        for &p in &frame.px {
+            let (r, g, b) = parts(p);
+            self.rgba.extend_from_slice(&[r, g, b]);
         }
-        let cols = ((w + cw - 1) / cw).clamp(1, self.cols);
-        let rows = ((h + ch - 1) / ch).clamp(1, self.rows);
+        let fit = (self.cols as f32 * cw / frame.w as f32).min(self.rows as f32 * ch / frame.h as f32);
+        let cols = ((frame.w as f32 * fit / cw).round() as i32).clamp(1, self.cols);
+        let rows = ((frame.h as f32 * fit / ch).round() as i32).clamp(1, self.rows);
         let (ox, oy) = ((self.cols - cols) / 2, (self.rows - rows) / 2);
+        let (w, h) = (frame.w, frame.h);
         self.big = cols * rows * 2 > self.cols * self.rows;
         if std::env::var_os("FUNKEY_DEBUG").is_some() {
-            let _ = std::fs::write(crate::debug_path(), format!("terminal {}x{} cells of {}x{} px; frame {}x{} times {} = {}x{} px over {}x{} cells at {},{}\n",
-                self.cols, self.rows, cw, ch, frame.w, frame.h, factor, w, h, cols, rows, ox, oy));
+            let _ = std::fs::write(crate::debug_path(), format!("terminal {}x{} cells of {}x{} px; frame {}x{} over {}x{} cells at {},{}\n",
+                self.cols, self.rows, cw, ch, w, h, cols, rows, ox, oy));
         }
         self.out.clear();
         self.out.push_str(&Cursor::at(ox as u16 + 1, oy as u16 + 1));
