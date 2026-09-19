@@ -39,6 +39,7 @@ impl Screen {
     /// Take over the terminal: raw mode, the alternate screen, no cursor.
     pub fn open() -> Screen {
         Crust::init();
+        Crust::enable_key_release();
         let backend = match std::env::var("FUNKEY_PIXELS").as_deref() {
             Ok("kitty") => Backend::Kitty,
             _ => Backend::HalfBlocks,
@@ -176,6 +177,7 @@ impl Drop for Screen {
             let _ = so.write_all(glow::kitty_forget(1).as_bytes());
             let _ = so.flush();
         }
+        Crust::disable_modifier_keys();
         Crust::cleanup();
     }
 }

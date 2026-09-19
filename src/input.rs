@@ -3,6 +3,7 @@
 //! coming. The first repeat takes the terminal's repeat delay to arrive,
 //! so a fresh press is held a little longer than a repeating one.
 
+use crust::input::KeyState;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -27,6 +28,9 @@ pub struct Input {
     held: HashMap<Key, Held>,
     pressed: Vec<Key>,
     pub resized: bool,
+    /// True once the terminal has reported a release or a repeat: from
+    /// then on a key is held exactly, from its press to its release.
+    exact: bool,
 }
 
 impl Input {
@@ -38,16 +42,47 @@ impl Input {
         self.resized = false;
         let now = Instant::now();
         while crust::input::Input::peek_pending() {
-            let Some(name) = crust::input::Input::getchr_ms(0) else { break };
+            let Some((name, state)) = crust::input::Input::event_ms(0) else { break };
             if name == "RESIZE" { self.resized = true; continue; }
             let Some(key) = key_from_name(&name) else { continue };
-            match self.held.get_mut(&key) {
-                Some(h) if now.duration_since(h.last) < hold_for(h.repeats) => { h.last = now; h.repeats += 1; }
-                _ => { self.held.insert(key, Held { last: now, repeats: 0 }); self.pressed.push(key); }
+            match state {
+                KeyState::Released => { self.exact = true; self.held.remove(&key); }
+                KeyState::Repeated => {
+                    self.exact = true;
+                    match self.held.get_mut(&key) {
+                        Some(h) => { h.last = now; h.repeats += 1; }
+                        None => { self.held.insert(key, Held { last: now, repeats: 1 }); }
+                    }
+                }
+                KeyState::Pressed => match self.held.get_mut(&key) {
+                    // Without release reports a press within the window is a repeat.
+                    Some(h) if self.exact || now.duration_since(h.last) < hold_for(h.repeats) => { h.last = now; h.repeats += 1; }
+                    _ => { self.held.insert(key, Held { last: now, repeats: 0 }); self.pressed.push(key); }
+                },
             }
         }
-        self.held.retain(|_, h| now.duration_since(h.last) < hold_for(h.repeats));
+        if !self.exact {
+            self.held.retain(|_, h| now.duration_since(h.last) < hold_for(h.repeats));
+        }
     }
+
+    /// True when the terminal reports key releases, so `held` is exact.
+    pub fn exact(&self) -> bool { self.exact }
+
+    /// True while a key keeps repeating: held past the terminal's repeat
+    /// delay. With release reports this is the same as `held`.
+    pub fn repeating(&self, key: Key) -> bool {
+        self.exact && self.held(key) || self.held.get(&key).map(|h| h.repeats > 0).unwrap_or(false)
+    }
+
+    /// A short press without release reports: the game should take one
+    /// step. With release reports a tap is a short `held`, and this is
+    /// never true.
+    pub fn tapped(&self, key: Key) -> bool { !self.exact && self.pressed(key) }
+
+    /// Continuous motion for a key: exact holding where the terminal
+    /// reports releases, repeating elsewhere.
+    pub fn motion(&self, key: Key) -> bool { if self.exact { self.held(key) } else { self.repeating(key) } }
 
     /// True while the key is down, as far as a terminal can tell.
     pub fn held(&self, key: Key) -> bool { self.held.contains_key(&key) }
@@ -102,6 +137,18 @@ mod tests {
         assert_eq!(key_from_name("X"), Some(Key::Char('x')));
         assert_eq!(key_from_name(" "), Some(Key::Space));
         assert_eq!(key_from_name("C-UP"), None);
+    }
+
+    #[test]
+    fn with_release_reports_a_key_is_held_until_released() {
+        let mut i = Input::new();
+        i.held.insert(Key::Up, Held { last: Instant::now() - Duration::from_secs(5), repeats: 0 });
+        i.exact = true;
+        assert!(i.held(Key::Up), "no timeout once releases are reported");
+        assert!(i.motion(Key::Up));
+        assert!(!i.tapped(Key::Up));
+        i.held.remove(&Key::Up);
+        assert!(!i.held(Key::Up));
     }
 
     #[test]

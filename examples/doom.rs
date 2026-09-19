@@ -138,16 +138,24 @@ impl Doom {
 impl Game for Doom {
     fn update(&mut self, input: &Input, dt: f32) -> Flow {
         if input.pressed(Key::Char('q')) || input.pressed(Key::Escape) { return Flow::Quit; }
-        let turn = 2.6 * dt;
-        if input.held(Key::Left) { self.cam.angle += turn; }
-        if input.held(Key::Right) { self.cam.angle -= turn; }
-        let speed = 260.0 * dt;
+        // A tap is one step; a key that keeps repeating, or is held where
+        // the terminal reports releases, moves continuously.
+        let tap_turn = 10f32.to_radians();
+        let turn = 2.4 * dt;
+        if input.tapped(Key::Left) { self.cam.angle += tap_turn; }
+        if input.tapped(Key::Right) { self.cam.angle -= tap_turn; }
+        if input.motion(Key::Left) { self.cam.angle += turn; }
+        if input.motion(Key::Right) { self.cam.angle -= turn; }
         let (fx, fy) = (self.cam.angle.cos(), self.cam.angle.sin());
         let (mut dx, mut dy) = (0.0, 0.0);
-        if input.held(Key::Up) || input.held(Key::Char('w')) { dx += fx * speed; dy += fy * speed; }
-        if input.held(Key::Down) || input.held(Key::Char('s')) { dx -= fx * speed; dy -= fy * speed; }
-        if input.held(Key::Char('a')) { dx -= fy * speed; dy += fx * speed; }
-        if input.held(Key::Char('d')) { dx += fy * speed; dy -= fx * speed; }
+        let mut go = |key: Key, ax: f32, ay: f32| {
+            if input.tapped(key) { dx += ax * 24.0; dy += ay * 24.0; }
+            if input.motion(key) { dx += ax * 260.0 * dt; dy += ay * 260.0 * dt; }
+        };
+        go(Key::Up, fx, fy); go(Key::Char('w'), fx, fy);
+        go(Key::Down, -fx, -fy); go(Key::Char('s'), -fx, -fy);
+        go(Key::Char('a'), -fy, fx);
+        go(Key::Char('d'), fy, -fx);
         if dx != 0.0 || dy != 0.0 { self.walk(dx, dy); }
         if input.pressed(Key::Space) || input.pressed(Key::Char('e')) { self.use_line(); }
         self.run_doors(dt);
