@@ -67,7 +67,7 @@ Pixel output through the terminal's graphics protocol where it has one. Sound.
 funkey = { version = "0.1", package = "fe2o3-funkey" }
 ```
 
-Set `FUNKEY_SHOT=/tmp/shot.ppm` to have the engine write the frame to a file twice a second, for screenshots and tests.
+Set `FUNKEY_PIXELS=kitty` to draw real pixels through the kitty graphics protocol instead of half blocks, in a terminal that has it. Set `FUNKEY_SHOT=/tmp/shot.ppm` to have the engine write the frame to a file twice a second, for screenshots and tests.
 
 ## License
 

@@ -1,10 +1,14 @@
-//! The terminal as a pixel display. Each cell shows two pixels: the
-//! upper half block `▀` with the top pixel as foreground and the bottom
-//! one as background. Only cells that changed since the last frame are
-//! sent, in one write.
+//! The terminal as a pixel display, two ways:
 //!
-//! A frame smaller than the display is scaled up by a whole number and
-//! centred; a larger one is scaled down to fit.
+//! - Half blocks, in any truecolor terminal: each cell shows two pixels,
+//!   the upper half block `▀` with the top pixel as foreground and the
+//!   bottom one as background. Only cells that changed since the last
+//!   frame are sent, in one write. A frame smaller than the display is
+//!   scaled up by a whole number and centred; a larger one is scaled
+//!   down to fit.
+//! - Real pixels through the kitty graphics protocol, where the terminal
+//!   has it: the whole frame goes out every time and the terminal scales
+//!   it to the window. `FUNKEY_PIXELS=kitty` picks this.
 
 use crate::frame::{parts, Frame, Rgb, BLACK};
 use crust::cursor::{seq, Cursor};
@@ -12,7 +16,11 @@ use crust::style;
 use crust::Crust;
 use std::io::Write;
 
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Backend { HalfBlocks, Kitty }
+
 pub struct Screen {
+    pub backend: Backend,
     /// Cells across and down.
     pub cols: i32,
     pub rows: i32,
@@ -22,13 +30,18 @@ pub struct Screen {
     last: Vec<(Rgb, Rgb)>,
     scaled: Frame,
     out: String,
+    rgba: Vec<u8>,
 }
 
 impl Screen {
     /// Take over the terminal: raw mode, the alternate screen, no cursor.
     pub fn open() -> Screen {
         Crust::init();
-        let mut s = Screen { cols: 0, rows: 0, w: 0, h: 0, last: Vec::new(), scaled: Frame::new(1, 1), out: String::new() };
+        let backend = match std::env::var("FUNKEY_PIXELS").as_deref() {
+            Ok("kitty") => Backend::Kitty,
+            _ => Backend::HalfBlocks,
+        };
+        let mut s = Screen { backend, cols: 0, rows: 0, w: 0, h: 0, last: Vec::new(), scaled: Frame::new(1, 1), out: String::new(), rgba: Vec::new() };
         s.resize();
         s
     }
@@ -49,6 +62,7 @@ impl Screen {
 
     /// Show a frame. The frame may be any size; see the module notes.
     pub fn present(&mut self, frame: &Frame) {
+        if self.backend == Backend::Kitty { return self.present_pixels(frame); }
         let needs_scale = frame.w != self.w || frame.h != self.h;
         if needs_scale { self.scale(frame); }
         // Take the scaled frame out while the cells are read, so the
@@ -90,6 +104,29 @@ impl Screen {
         let _ = so.flush();
     }
 
+    /// The frame as real pixels: one kitty image, replaced every frame,
+    /// stretched over the cells that keep the frame's shape.
+    fn present_pixels(&mut self, frame: &Frame) {
+        self.rgba.clear();
+        self.rgba.reserve((frame.w * frame.h * 4) as usize);
+        for &p in &frame.px {
+            let (r, g, b) = parts(p);
+            self.rgba.extend_from_slice(&[r, g, b, 255]);
+        }
+        // Cells are about twice as tall as wide: a frame of w by h pixels
+        // keeps its shape over w by h/2 cells, scaled to fit the window.
+        let fit = (self.cols as f32 / frame.w as f32).min(self.rows as f32 * 2.0 / frame.h as f32);
+        let cols = ((frame.w as f32 * fit) as i32).clamp(1, self.cols);
+        let rows = ((frame.h as f32 * fit / 2.0) as i32).clamp(1, self.rows);
+        let (ox, oy) = ((self.cols - cols) / 2, (self.rows - rows) / 2);
+        self.out.clear();
+        self.out.push_str(&Cursor::at(ox as u16 + 1, oy as u16 + 1));
+        self.out.push_str(&glow::kitty_frame(1, frame.w as u32, frame.h as u32, cols as u16, rows as u16, &self.rgba));
+        let mut so = std::io::stdout();
+        let _ = so.write_all(self.out.as_bytes());
+        let _ = so.flush();
+    }
+
     /// Nearest-neighbour scaling into the display, keeping the frame's
     /// shape, black around it.
     fn scale(&mut self, frame: &Frame) {
@@ -118,6 +155,11 @@ impl Screen {
 
 impl Drop for Screen {
     fn drop(&mut self) {
+        if self.backend == Backend::Kitty {
+            let mut so = std::io::stdout();
+            let _ = so.write_all(glow::kitty_forget(1).as_bytes());
+            let _ = so.flush();
+        }
         Crust::cleanup();
     }
 }
