@@ -361,7 +361,7 @@ mod tests {
         let p = Picture::from_patch(&d).unwrap();
         assert_eq!((p.w, p.h), (2, 3));
         assert_eq!(p.px, vec![NO_PIXEL, 7, 9, NO_PIXEL, NO_PIXEL, NO_PIXEL]);
-        assert_eq!(p.at(-1, 4), 7, "lookups wrap");
+        assert_eq!(p.at(-2, 4), 7, "lookups wrap");
     }
 
     #[test]
