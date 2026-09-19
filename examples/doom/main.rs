@@ -41,6 +41,8 @@ thread_local! {
 const W: i32 = 320;
 const H: i32 = 240;
 const VIEW_H: i32 = 202;
+/// The game's own version; the engine has its own.
+const VERSION: &str = "1.0";
 
 enum Screen { Title, Play, Inter(Inter), End }
 
@@ -348,7 +350,11 @@ impl Game for Doom {
 
     fn draw(&mut self, f: &mut Frame) {
         match &self.screen {
-            Screen::Title => { self.art.use_palette(0); if !self.hud.full(f, &self.art, "TITLEPIC") { f.clear(0); } }
+            Screen::Title => {
+                self.art.use_palette(0);
+                if !self.hud.full(f, &self.art, "TITLEPIC") { f.clear(0); }
+                f.text(W - 4 - Frame::text_width(VERSION, false, 1), H - 6, VERSION, 0x808080);
+            }
             Screen::Inter(inter) => { self.art.use_palette(0); self.hud.draw_intermission(f, &self.art, inter); }
             Screen::End => {
                 self.art.use_palette(0);

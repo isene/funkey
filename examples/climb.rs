@@ -9,6 +9,9 @@
 use funkey::*;
 
 const TILE: i32 = 8;
+/// The game's own version; the engine has its own.
+#[allow(dead_code)]
+const VERSION: &str = "1.0";
 const LEVEL: [&str; 12] = [
     "################",
     "#o     o     o #",

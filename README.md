@@ -62,7 +62,7 @@ Three examples come with the engine:
 
 - `climb`: a small Jumpman-style platformer, 200 lines. Ladders, coins, blobs.
 - `jumpman`: a Jumpman Junior kind of game. Five levels of girders, ladders and ropes. Bombs to collect, bullets to jump, robots to dodge. A fall from too high is the end of you. Some bombs reveal ladders or take girders away. A title tune, a high score.
-- `drive`: a car on a road over rolling hills, on the 3D rasterizer. Go fast, leave the road, regret it.
+- `drive`: a car on a winding road over the hills, on the 3D rasterizer. Fetch the packages before the clock runs out, then more of them with less time. An arrow points at the nearest. Go fast, leave the road, regret it.
 
 ```bash
 cargo run --release --example jumpman
@@ -111,6 +111,13 @@ writes the last frame. `DOOM_BENCH=1` times the renderer.
 - Heretic and Hexen: their WADs load, their monsters and weapons do not yet exist.
 - Textured triangles and a mesh loader for the rasterizer.
 - Music for Doom from its MUS lumps.
+
+## Versions
+
+The crate version is the engine's and moves only when the engine
+changes. Each game has its own version, shown on its title screen and
+tagged as `<game>-vX.Y`: `doom-v1.0`, `jumpman-v1.1`, `drive-v1.0`,
+`climb-v1.0`.
 
 ## Using it
 

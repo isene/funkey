@@ -14,6 +14,8 @@ const H: i32 = 192;
 const TILE: i32 = 8;
 const TOP: i32 = 16;
 const GAME: &str = "jumpman";
+/// The game's own version; the engine has its own.
+const VERSION: &str = "1.1";
 
 struct Level { name: &'static str, rows: [&'static str; 22], bullets: bool }
 
@@ -57,11 +59,11 @@ const LEVELS: [Level; 5] = [
         "     H       |    |       H     ",
         "     H   *   |    |   *   H     ",
         "     H       |    |       H     ",
-        "  ###H####   |    |   ####H###  ",
-        "             |    |             ",
-        "    *     ###|####|###     *    ",
-        "  ########   |    |   ########  ",
-        "             |    |             ",
+        "  #H#H####   |    |   ####H#H#  ",
+        "   H         |    |         H   ",
+        "   H         |    |         H   ",
+        "   H*        |    |        *H   ",
+        "  #H##       |    |       ##H#  ",
         "       *     |    |     *       ",
         "  P    ######|####|######       ",
         "################################",
@@ -69,7 +71,7 @@ const LEVELS: [Level; 5] = [
     Level { name: "HIDDEN LADDERS", bullets: false, rows: [
         "                                ",
         "                                ",
-        "  *     *      @      *     *   ",
+        "  *     *      *      *     *   ",
         "  #########h#####h##########    ",
         "           h     h              ",
         "           h     h              ",
@@ -77,7 +79,7 @@ const LEVELS: [Level; 5] = [
         "  ####h####h#####h######h####   ",
         "      h                 h       ",
         "      h                 h       ",
-        "   *  h      *    *     h   *   ",
+        "   *  h      @    *     h   *   ",
         "  ####h#########H#######h#####  ",
         "                H               ",
         "                H               ",
@@ -93,25 +95,25 @@ const LEVELS: [Level; 5] = [
     Level { name: "VANISHING ACT", bullets: true, rows: [
         "                                ",
         "                                ",
-        "     *     *   %   *     *      ",
-        "  ###H####=====H=====#####H###  ",
-        "     H                    H     ",
-        "     H  *              *  H     ",
-        "  ###H###            ######H##  ",
-        "                                ",
-        "   *  ======  *  *  ======  *   ",
-        "  ####H#####================### ",
-        "      H                         ",
-        "      H  *      *      *        ",
-        "  ####H########H#########H####  ",
-        "               H         H      ",
-        "               H         H      ",
-        "    *          H    *    H  *   ",
-        "  ######H######H#####H###H####  ",
-        "        H            H          ",
-        "        H            H          ",
-        "  P  *  H     *      H   *      ",
-        "  ######H############H########  ",
+        "    *       *   %     *      *  ",
+        "  ###H###===###H###===####H###  ",
+        "     H         H          H     ",
+        "     H  *      H          H  *  ",
+        "  ###H###======H======####H###  ",
+        "     H         H          H     ",
+        "  *  H   *     H  *       H *   ",
+        "  ###H#####====H=#####H###H###  ",
+        "     H         H      H         ",
+        "   * H    *    H *    H     *   ",
+        "  ###H#########H######H#######  ",
+        "               H                ",
+        "     *         H        *       ",
+        "  ######H======H========H#####  ",
+        "        H      H        H       ",
+        "   *    H     *H   *    H    *  ",
+        "  ######H######H########H#####  ",
+        "        H      H        H       ",
+        "  P   * H      H *      H   *   ",
         "################################",
     ]},
     Level { name: "ROBOT RUN", bullets: true, rows: [
@@ -433,6 +435,7 @@ impl Game for Jumpman {
             f.text_centered(W / 2, 140, &format!("HIGH SCORE {:06}", self.high), TEXT, true, 1);
             if (self.time * 2.0) as i32 % 2 == 0 { f.text_centered(W / 2, 160, "PRESS SPACE", TEXT, true, 1); }
             f.text_centered(W / 2, 178, "ARROWS RUN AND CLIMB  SPACE JUMPS", 0x8080a0, false, 1);
+            f.text(W - 4 - Frame::text_width(VERSION, false, 1), H - 6, VERSION, 0x505070);
             return;
         }
         // The level, below the HUD.
