@@ -69,6 +69,10 @@ impl Input {
     /// True when the terminal reports key releases, so `held` is exact.
     pub fn exact(&self) -> bool { self.exact }
 
+    /// Tell the input up front that the terminal reports releases, so
+    /// the first press is not held on a timer while it waits to learn.
+    pub fn set_exact(&mut self, exact: bool) { self.exact = self.exact || exact; }
+
     /// True while a key keeps repeating: held past the terminal's repeat
     /// delay. With release reports this is the same as `held`.
     pub fn repeating(&self, key: Key) -> bool {

@@ -20,7 +20,7 @@ Arrows or WASD move, Space jumps, Up and Down climb a ladder, R restarts, Q quit
 
 - **Frame**: a pixel framebuffer with rectangles, lines, sprites and a built-in 3 by 5 font.
 - **Sprite**: rows of characters and a palette, so a game needs no image files. Transparent pixels, flipping.
-- **Input**: keys with a held state. A terminal has no key-up, so a key counts as held while its repeats keep coming. `pressed` for the tick a key went down, `axis_x` and `axis_y` for movement.
+- **Input**: keys with a held state. Where the terminal reports key releases (glass, kitty), a key is held from its press to its release; elsewhere it counts as held while its repeats keep coming. `pressed` for the tick a key went down, `axis_x` and `axis_y` for movement.
 - **Tilemap and Body**: levels as lines of text, solid and one-way tiles. Boxes fall, run and stop at walls, one axis at a time.
 - **run**: a fixed-step loop at the frame rate you ask for. The frame is scaled to the terminal by whole numbers and centred.
 
