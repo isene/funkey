@@ -70,7 +70,7 @@ jobs:
         run: |
           mkdir -p ../out
           cp target/${{ matrix.target }}/release/funkeys ../out/funkeys-${{ matrix.suffix }}
-          for g in climb jumpman invaders drive soar doom; do
+          for g in climb jumpman invaders drive soar castle doom; do
             cp target/${{ matrix.target }}/release/examples/$g ../out/$g-${{ matrix.suffix }}
           done
           chmod +x ../out/*
@@ -101,10 +101,10 @@ jobs:
             ## Installation
 
             `funkeys` is the picker; `climb`, `jumpman`, `invaders`, `drive`,
-            `soar` and `doom` are the games. Take the ones you want:
+            `soar`, `castle` and `doom` are the games. Take the ones you want:
 
             ```bash
-            for b in funkeys climb jumpman invaders drive soar doom; do
+            for b in funkeys climb jumpman invaders drive soar castle doom; do
               curl -L "https://github.com/isene/funkey/releases/latest/download/$b-linux-x86_64" \
                 -o ~/bin/$b && chmod +x ~/bin/$b
             done

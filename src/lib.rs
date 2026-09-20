@@ -48,7 +48,7 @@ pub use audio::{Audio, Sample, Tune, Wave};
 pub use frame::{parts, rgb, Frame, Rgb, BLACK, WHITE};
 pub use input::{Input, Key};
 pub use particles::Particles;
-pub use raster::{Cam3, Mesh, Raster, M4, V3};
+pub use raster::{Cam3, Mat, Mesh, Model, Raster, Scene, Texture, Vert, CUTOUT, M4, V3};
 pub use rng::Rng;
 pub use screen::Screen;
 pub use sprite::Sprite;

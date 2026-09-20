@@ -25,6 +25,7 @@ Arrows or WASD move, Space jumps, Up and Down climb a ladder, R restarts, Q quit
 - **Audio**: samples mixed in the engine and piped to pw-play, paplay or aplay. WAV files, Doom lumps, or made on the spot: tones, slides, noise, and tunes written as notes. Channels that loop, change volume and pitch while they play.
 - **Particles**: bursts of sparks that fly, fall and fade.
 - **Raster**: a software 3D rasterizer. Meshes of flat-shaded triangles, a camera, a depth buffer, fog.
+- `Scene`: textured triangles with a light per corner, `Texture`s that wrap, have holes and shrink into mip levels, `Model` builders for boxes, tubes and cones, sphere culling, fog, a sky through every pixel, and the rows painted on every core at once.
 - **wad and doom**: Doom's WAD files, and the sector renderer that draws a level and the sprites a game hands it.
 - **Rng and store**: seeded random numbers, and high scores kept under `~/.funkey/`.
 - **run**: a fixed-step loop at the frame rate you ask for. The frame is scaled to the terminal and centred. With `FUNKEY_SCRIPT` set, the same loop runs with no terminal and writes frames, for tests and films.
@@ -58,12 +59,13 @@ fn main() {
 
 ## The games
 
-Five games come with the engine, and Doom below:
+Six games come with the engine, and Doom below:
 
 - `climb`: a small Jumpman-style platformer, 200 lines. Ladders, coins, blobs.
 - `jumpman`: a Jumpman Junior kind of game. Five levels of girders, ladders and ropes. Bombs to collect, bullets to jump, robots to dodge. A fall from too high is the end of you. Some bombs reveal ladders or take girders away. A title tune, a high score.
 - `invaders`: fifty-five of them, marching down. Shields crumble where they are hit. The march quickens as the rows thin, a mystery ship crosses the top, each wave starts lower.
 - `soar`: a flight over fractal mountains, water and clouds, a height map ray-cast a column at a time. A demo of what real pixels can look like; nothing to win.
+- `castle`: a walk from the hills to a castle and in through its gate, on the textured rasterizer. Stone, slate and wood as textures, the sun and its shadows baked into every corner, banners, torches, pines, mountains and clouds, painted on every core at 960 by 600. Nothing to win.
 - `drive`: a car on a winding road over the hills, on the 3D rasterizer. Fetch the packages before the clock runs out, then more of them with less time. An arrow points at the nearest. Go fast, leave the road, regret it.
 
 ```bash
@@ -71,6 +73,7 @@ cargo run --release --example jumpman
 cargo run --release --example invaders
 cargo run --release --example drive
 cargo run --release --example soar
+cargo run --release --example castle
 ```
 
 `funkeys` is the picker: the games as cards with screenshots, Enter plays
@@ -119,7 +122,7 @@ writes the last frame. `DOOM_BENCH=1` times the renderer.
 ## Where it is going
 
 - Heretic and Hexen: their WADs load, their monsters and weapons do not yet exist.
-- Textured triangles and a mesh loader for the rasterizer.
+- A mesh loader for the textured scene.
 - Music for Doom from its MUS lumps.
 
 ## Versions
@@ -127,7 +130,7 @@ writes the last frame. `DOOM_BENCH=1` times the renderer.
 The crate version is the engine's and moves only when the engine
 changes. Each game has its own version, shown on its title screen and
 tagged as `<game>-vX.Y`: `doom-v1.0`, `jumpman-v1.1`, `invaders-v1.0`,
-`drive-v1.0`, `soar-v1.0`, `climb-v1.0`. The picker is `funkeys-v1.0`.
+`drive-v1.0`, `soar-v1.0`, `climb-v1.0`, `castle-v1.0`. The picker is `funkeys-v1.1`.
 
 ## Using it
 
