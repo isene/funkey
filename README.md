@@ -73,6 +73,12 @@ cargo run --release --example drive
 cargo run --release --example soar
 ```
 
+`funkeys` is the picker: the games as cards with screenshots, Enter plays
+the one under the cursor, `?` shows its keys. In a terminal with kitty
+graphics it gives the games real pixels. Every release on GitHub carries
+`funkeys` and the six games as binaries for Linux and macOS; the fe2o3
+launcher fetches them all with `i` on its funkey card.
+
 ## Doom
 
 The second game is Doom itself, on funkey's sector renderer: the level
@@ -121,7 +127,7 @@ writes the last frame. `DOOM_BENCH=1` times the renderer.
 The crate version is the engine's and moves only when the engine
 changes. Each game has its own version, shown on its title screen and
 tagged as `<game>-vX.Y`: `doom-v1.0`, `jumpman-v1.1`, `invaders-v1.0`,
-`drive-v1.0`, `soar-v1.0`, `climb-v1.0`.
+`drive-v1.0`, `soar-v1.0`, `climb-v1.0`. The picker is `funkeys-v1.0`.
 
 ## Using it
 
