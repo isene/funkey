@@ -18,10 +18,18 @@ use crust::Crust;
 use std::io::Write;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-pub enum Backend { HalfBlocks, Kitty }
+pub enum Backend {
+    HalfBlocks,
+    Kitty,
+    /// A bare console: the pixels of the screen itself, written through
+    /// glow. Chosen on its own where there is no terminal to ask.
+    Screen,
+}
 
 pub struct Screen {
     pub backend: Backend,
+    /// The console screen, opened once and kept for the whole game.
+    fb: Option<glow::fb::Screen>,
     /// Cells across and down.
     pub cols: i32,
     pub rows: i32,
@@ -42,9 +50,15 @@ impl Screen {
         Crust::enable_key_release();
         let backend = match std::env::var("FUNKEY_PIXELS").as_deref() {
             Ok("kitty") => Backend::Kitty,
+            Ok("blocks") => Backend::HalfBlocks,
+            // On a console there is no protocol to speak, but the screen
+            // is right there. Real pixels beat blocks every time.
+            _ if glow::fb::there() => Backend::Screen,
             _ => Backend::HalfBlocks,
         };
-        let mut s = Screen { backend, cols: 0, rows: 0, w: 0, h: 0, last: Vec::new(), scaled: Frame::new(1, 1), out: String::new(), rgba: Vec::new(), big: false };
+        let fb = if backend == Backend::Screen { glow::fb::Screen::open() } else { None };
+        let backend = if backend == Backend::Screen && fb.is_none() { Backend::HalfBlocks } else { backend };
+        let mut s = Screen { backend, fb, cols: 0, rows: 0, w: 0, h: 0, last: Vec::new(), scaled: Frame::new(1, 1), out: String::new(), rgba: Vec::new(), big: false };
         s.resize();
         s
     }
@@ -55,6 +69,13 @@ impl Screen {
         let (c, r) = Crust::terminal_size();
         self.cols = c.max(1) as i32;
         self.rows = r.max(1) as i32;
+        if let Some(fb) = &self.fb {
+            // The display is the screen, pixel for pixel.
+            self.w = fb.w as i32;
+            self.h = fb.h as i32;
+            self.last = Vec::new();
+            return;
+        }
         self.w = self.cols;
         self.h = self.rows * 2;
         self.last = vec![(0xffff_ffff, 0xffff_ffff); (self.cols * self.rows) as usize];
@@ -65,6 +86,7 @@ impl Screen {
 
     /// Show a frame. The frame may be any size; see the module notes.
     pub fn present(&mut self, frame: &Frame) {
+        if self.backend == Backend::Screen { return self.present_screen(frame); }
         if self.backend == Backend::Kitty { return self.present_pixels(frame); }
         let needs_scale = frame.w != self.w || frame.h != self.h;
         if needs_scale { self.scale(frame); }
@@ -105,6 +127,25 @@ impl Screen {
         let mut so = std::io::stdout();
         let _ = so.write_all(self.out.as_bytes());
         let _ = so.flush();
+    }
+
+    /// The frame on a bare console: scaled to the screen, keeping its
+    /// shape, and written straight to the pixels. No terminal is asked
+    /// anything, so nothing is drawn per cell and nothing is encoded.
+    fn present_screen(&mut self, frame: &Frame) {
+        if frame.w != self.w || frame.h != self.h {
+            self.scale(frame);
+        }
+        let shown: &Frame = if frame.w != self.w || frame.h != self.h { &self.scaled } else { frame };
+        self.rgba.clear();
+        self.rgba.reserve((self.w * self.h * 4) as usize);
+        for &p in &shown.px {
+            let (r, g, b) = parts(p);
+            self.rgba.extend_from_slice(&[r, g, b, 255]);
+        }
+        if let Some(fb) = &self.fb {
+            fb.blit(0, 0, self.w as usize, self.h as usize, &self.rgba);
+        }
     }
 
     /// The frame as real pixels: one kitty image, replaced every frame,
@@ -172,6 +213,10 @@ impl Screen {
 
 impl Drop for Screen {
     fn drop(&mut self) {
+        if let Some(fb) = &self.fb {
+            // Leave the console its own screen back, black.
+            fb.fill(0, 0, fb.w, fb.h, (0, 0, 0));
+        }
         if self.backend == Backend::Kitty {
             let mut so = std::io::stdout();
             let _ = so.write_all(glow::kitty_forget(1).as_bytes());
