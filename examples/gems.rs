@@ -31,9 +31,11 @@ const HZ: i32 = 8;
 const BASE: i32 = -2;
 const GAME: &str = "gems";
 /// The game's own version; the engine has its own.
-const VERSION: &str = "1.2";
+const VERSION: &str = "1.3";
 const JUMP: f32 = 0.75;
-const BEAR_SPEED: f32 = 3.2;
+/// How fast the whole game moves: the bear, the foes and the bees alike.
+const PACE: f32 = 1.15;
+const BEAR_SPEED: f32 = 3.2 * PACE;
 const HAT_TIME: f32 = 8.0;
 
 /// A castle: heights as digits, a space where there is nothing, and the
@@ -393,7 +395,7 @@ impl Gems {
         self.left = self.gems.len();
         self.gems_changed = true;
         // Faster with every castle, every wave and every time round.
-        let pace = 1.0 + 0.06 * self.castle as f32 + 0.05 * wave as f32 + 0.15 * self.round as f32;
+        let pace = PACE * (1.0 + 0.06 * self.castle as f32 + 0.05 * wave as f32 + 0.15 * self.round as f32);
         self.foes.clear();
         for (i, at) in objs('E').into_iter().enumerate() { self.foes.push(Foe::new(Kind::Eater, at, 1.3 * pace, 1.0 + i as f32)); }
         for at in objs('T') { self.foes.push(Foe::new(Kind::Tree, at, 1.25 * pace, 3.0)); }
@@ -629,7 +631,7 @@ impl Gems {
             if f.kind == Kind::Eater {
                 let gem_here = self.by_cell[(here.1 * N + here.0) as usize].iter()
                     .any(|&i| self.gems[i].alive && self.gems[i].x.fract() == 0.5 && self.gems[i].y.fract() == 0.5);
-                if gem_here { f.eating = 0.7; continue; }
+                if gem_here { f.eating = 0.7 / PACE; continue; }
             }
             let field = match f.kind { Kind::Eater => &self.gem_field, _ => &self.bear_field };
             let wander = match f.kind { Kind::Ball => 0.3, Kind::Tree => 0.12, _ => 0.0 };
@@ -650,7 +652,7 @@ impl Gems {
         }
         let Some(b) = self.bees.as_mut() else { return };
         b.life -= dt;
-        let pace = 1.1 + 0.1 * self.castle as f32;
+        let pace = PACE * (1.1 + 0.1 * self.castle as f32);
         let (dx, dy) = (self.bear.0 - b.x, self.bear.1 - b.y);
         let d = dx.hypot(dy).max(0.001);
         if b.life > 1.5 {
@@ -1152,7 +1154,7 @@ mod tests {
         std::env::set_var("FUNKEY_SOUND", "0");
         let mut g = Gems::new();
         g.start_game();
-        g.foes = vec![Foe::new(Kind::Tree, (7, 13), 1.25, 0.0)];
+        g.foes = vec![Foe::new(Kind::Tree, (7, 13), 1.25 * PACE, 0.0)];
         let mut input = Input::new();
         let mut jumped = false;
         for _ in 0..180 {
