@@ -26,8 +26,8 @@ const HZ: i32 = 4;
 const BASE: i32 = -2;
 const GAME: &str = "gems";
 /// The game's own version; the engine has its own.
-const VERSION: &str = "1.0";
-const JUMP: f32 = 0.6;
+const VERSION: &str = "1.1";
+const JUMP: f32 = 0.75;
 const BEAR_SPEED: f32 = 3.2;
 const HAT_TIME: f32 = 8.0;
 
@@ -204,11 +204,15 @@ struct Gem { x: f32, y: f32, h: i32, alive: bool }
 enum Kind { Eater, Tree, Ball, Witch }
 
 /// Someone who walks the castle block by block.
-struct Foe { kind: Kind, from: (i32, i32), to: (i32, i32), t: f32, speed: f32, wait: f32, eating: f32, start: (i32, i32), start_wait: f32 }
+struct Foe {
+    kind: Kind, from: (i32, i32), to: (i32, i32), t: f32, speed: f32, wait: f32, eating: f32, start: (i32, i32), start_wait: f32,
+    /// Jumped over: harmless until it has passed, even if the bear lands on it.
+    jumped: bool,
+}
 
 impl Foe {
     fn new(kind: Kind, at: (i32, i32), speed: f32, wait: f32) -> Foe {
-        Foe { kind, from: at, to: at, t: 0.0, speed, wait, eating: 0.0, start: at, start_wait: wait }
+        Foe { kind, from: at, to: at, t: 0.0, speed, wait, eating: 0.0, start: at, start_wait: wait, jumped: false }
     }
     fn pos(&self) -> (f32, f32) {
         let (a, b) = (self.from, self.to);
@@ -225,6 +229,7 @@ impl Foe {
         self.t = 0.0;
         self.wait = self.start_wait;
         self.eating = 0.0;
+        self.jumped = false;
     }
 }
 
@@ -548,17 +553,20 @@ impl Gems {
         self.move_bees(dt);
         if self.mode != Mode::Play { return; }
 
-        // Touching a foe.
-        let air = self.jump > 0.12 && self.jump < JUMP - 0.08;
+        // Touching a foe. In the air nothing on the ground can touch the
+        // bear, and what he jumped stays harmless until it has passed.
+        let air = self.jump > 0.0;
         let mut i = 0;
         while i < self.foes.len() {
-            let f = &self.foes[i];
-            if f.wait > 0.0 { i += 1; continue; }
-            let (fx, fy) = f.pos();
-            let close = (fx - self.bear.0).hypot(fy - self.bear.1) < 0.55 && (f.height(&self.map) - self.bear_h).abs() < 1.2;
-            if !close { i += 1; continue; }
+            let (fx, fy) = self.foes[i].pos();
+            let close = self.foes[i].wait <= 0.0
+                && (fx - self.bear.0).hypot(fy - self.bear.1) < 0.5
+                && (self.foes[i].height(&self.map) - self.bear_h).abs() < 1.2;
+            let f = &mut self.foes[i];
+            if !close { f.jumped = false; i += 1; continue; }
             if self.hat_time > 0.0 || (f.kind == Kind::Eater && f.eating > 0.0) { self.kill_foe(i); continue; }
-            if air { i += 1; continue; }
+            if air { f.jumped = true; }
+            if f.jumped { i += 1; continue; }
             self.die();
             return;
         }
@@ -904,6 +912,28 @@ mod tests {
             let blocks = map.h.iter().enumerate().filter(|(i, h)| h.is_some() && reach[*i] != i32::MAX).count();
             assert!(blocks >= 60, "{}: only {blocks} blocks to walk", c.name);
         }
+    }
+
+    /// Run the bear left along the front row at a tree coming the other
+    /// way, jump when it is close, and land alive on the far side.
+    #[test]
+    fn a_tree_can_be_jumped() {
+        std::env::set_var("FUNKEY_SOUND", "0");
+        let mut g = Gems::new();
+        g.start_game();
+        g.foes = vec![Foe::new(Kind::Tree, (7, 13), 1.25, 0.0)];
+        let mut input = Input::new();
+        let mut jumped = false;
+        for _ in 0..180 {
+            input.release_all();
+            input.inject(Key::Left);
+            let (tx, _) = g.foes[0].pos();
+            if !jumped && (tx - g.bear.0).abs() < 0.9 { input.inject(Key::Space); jumped = true; }
+            g.update(&input, 1.0 / 60.0);
+            assert!(g.mode == Mode::Play, "the bear died at {:?}, the tree at {:?}", g.bear, g.foes[0].pos());
+        }
+        assert!(jumped);
+        assert!(g.foes[0].pos().0 > g.bear.0, "the tree should be behind the bear");
     }
 
     #[test]
