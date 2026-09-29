@@ -7,6 +7,8 @@
 //!     cargo run --release --example gems
 //!
 //! The arrows walk, two at once for the diagonals; Space jumps; Q quits.
+//! `GEMS_START=<castle>,<wave>` starts elsewhere; `GEMS_BENCH=<frames>`
+//! times the game with no terminal.
 //! Everything here is new: the castles, the pictures and the music.
 
 use funkey::*;
@@ -890,7 +892,20 @@ impl Game for Gems {
 }
 
 fn main() {
-    run(&mut Gems::new(), Config { width: W, height: H, fps: 60 });
+    let mut game = Gems::new();
+    // GEMS_BENCH=<frames> plays that many frames with no terminal and
+    // prints the time one takes.
+    if let Ok(n) = std::env::var("GEMS_BENCH") {
+        let n: u32 = n.parse().unwrap_or(1000);
+        game.start_game();
+        let mut f = Frame::new(W, H);
+        let input = Input::new();
+        let t0 = std::time::Instant::now();
+        for _ in 0..n { game.update(&input, 1.0 / 60.0); game.draw(&mut f); }
+        eprintln!("{:.3} ms a frame at {}x{} over {} frames", t0.elapsed().as_secs_f64() * 1000.0 / n as f64, W, H, n);
+        return;
+    }
+    run(&mut game, Config { width: W, height: H, fps: 60 });
 }
 
 #[cfg(test)]
