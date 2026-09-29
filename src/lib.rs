@@ -104,6 +104,10 @@ pub fn run(game: &mut dyn Game, cfg: Config) {
     let step = Duration::from_secs_f64(1.0 / cfg.fps.max(1) as f64);
     let dt = step.as_secs_f32();
     let shot = std::env::var_os("FUNKEY_SHOT").map(std::path::PathBuf::from);
+    // Real pixels over a whole window cost the display server a scale
+    // pass per frame; 30 a second is plenty there, so faster games show
+    // every other frame.
+    let halve = cfg.fps > 30;
     let mut next = Instant::now();
     let mut ticks: u64 = 0;
     loop {
@@ -118,9 +122,7 @@ pub fn run(game: &mut dyn Game, cfg: Config) {
         }
         if updates > 0 {
             game.draw(&mut frame);
-            // Real pixels over a whole window cost the display server a
-            // scale pass per frame; 30 a second is plenty there.
-            if !(screen.big() && ticks % 2 == 1) { screen.present(&frame); }
+            if !(halve && screen.big() && ticks % 2 == 1) { screen.present(&frame); }
             if let Some(p) = &shot { if ticks % 30 == 0 { let _ = std::fs::write(p, frame.to_ppm()); } }
         }
         let now = Instant::now();
