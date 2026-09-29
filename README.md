@@ -132,7 +132,7 @@ writes the last frame. `DOOM_BENCH=1` times the renderer.
 The crate version is the engine's and moves only when the engine
 changes. Each game has its own version, shown on its title screen and
 tagged as `<game>-vX.Y`: `doom-v1.0`, `jumpman-v1.1`, `invaders-v1.0`,
-`drive-v1.0`, `soar-v1.0`, `climb-v1.0`, `castle-v1.0`, `gems-v1.1`. The picker is `funkeys-v1.2`.
+`drive-v1.0`, `soar-v1.0`, `climb-v1.0`, `castle-v1.0`, `gems-v1.2`. The picker is `funkeys-v1.2`.
 
 ## Using it
 

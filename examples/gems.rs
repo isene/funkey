@@ -14,21 +14,24 @@
 use funkey::*;
 use std::collections::VecDeque;
 
-const W: i32 = 256;
-const H: i32 = 192;
-const TOP: i32 = 16;
+const W: i32 = 512;
+const H: i32 = 384;
+const TOP: i32 = 32;
 /// The castle is N by N blocks.
 const N: i32 = 14;
 /// Where the back corner of the ground sits on screen.
 const OX: i32 = W / 2;
-const OY: i32 = 58;
+const OY: i32 = 116;
+/// Half a block's width and half its depth, on screen.
+const HALF_W: i32 = 16;
+const HALF_H: i32 = 8;
 /// Pixels a block rises for each step of height.
-const HZ: i32 = 4;
+const HZ: i32 = 8;
 /// How far the foundations reach below the ground, in steps.
 const BASE: i32 = -2;
 const GAME: &str = "gems";
 /// The game's own version; the engine has its own.
-const VERSION: &str = "1.1";
+const VERSION: &str = "1.2";
 const JUMP: f32 = 0.75;
 const BEAR_SPEED: f32 = 3.2;
 const HAT_TIME: f32 = 8.0;
@@ -197,7 +200,7 @@ fn cell_of(x: f32, y: f32) -> (i32, i32) { (x.floor() as i32, y.floor() as i32) 
 
 /// A point on the castle, in blocks and steps of height, on screen.
 fn project(x: f32, y: f32, h: f32) -> (i32, i32) {
-    (OX + ((x - y) * 8.0).round() as i32, OY + ((x + y) * 4.0).round() as i32 - (h * HZ as f32).round() as i32)
+    (OX + ((x - y) * HALF_W as f32).round() as i32, OY + ((x + y) * HALF_H as f32).round() as i32 - (h * HZ as f32).round() as i32)
 }
 
 struct Gem { x: f32, y: f32, h: i32, alive: bool }
@@ -289,27 +292,37 @@ struct Gems {
 
 impl Gems {
     fn new() -> Gems {
-        let bp = [('b', 0x9a5a28), ('l', 0xd8a060), ('k', 0x101010), ('w', 0xffffff), ('p', 0xf08080)];
+        // The bear, drawn at full size: an outline, fur in three shades, a muzzle.
+        let bp = [('o', 0x3a1c08), ('b', 0x9a5a28), ('B', 0x6e3c18), ('l', 0xc88a4a), ('m', 0xe8c090),
+                  ('k', 0x101010), ('w', 0xffffff), ('n', 0x201008), ('p', 0xe08080)];
+        let head = [".oo.......oo.", "obpo.....opbo", "obbooooooobbo", ".obbbbbbbbbo.", "obbbbbbbbbbbo",
+                    "obwkbbbbbwkbo", "obkkbmmmbkkbo", "obbbmmnmmbbbo", ".obbmmmmmbbo.", "..obbmmmbbo..",
+                    ".obbbbbbbbbo.", "obbblllllbbbo", "obbblllllbbbo", ".obblllllbbo.", "..obbbbbbbo.."];
+        let bear = |legs: [&'static str; 2]| -> Sprite {
+            let rows: Vec<&str> = head.iter().copied().chain(legs).collect();
+            Sprite::from_rows(&rows, &bp)
+        };
         let bear_img = vec![
-            Sprite::from_rows(&["bb...bb", "blbbblb", ".bbbbb.", ".bkbkb.", ".bblbb.", "bbbkbbb", "b.bbb.b", ".bbbbb.", ".bb.bb."], &bp),
-            Sprite::from_rows(&["bb...bb", "blbbblb", ".bbbbb.", ".bkbkb.", ".bblbb.", "bbbkbbb", "b.bbb.b", ".bbbbb.", ".b...b."], &bp),
-            Sprite::from_rows(&["b.....b", "bbb.bbb", "blbbblb", ".bkbkb.", ".bblbb.", "..bkb..", ".bbbbb.", ".bbbbb.", "bb...bb"], &bp),
+            bear(["..obbo.obbo..", ".oBBBo.oBBBo."]),
+            bear([".obbo...obbo.", ".oBBo...oBBo."]),
+            bear(["...oboobo....", "...oBBoBBo..."]),
         ];
+        // The others are drawn small, then doubled, lit and outlined.
         let tp = [('g', 0x38a040), ('d', 0x1c6020), ('k', 0x101010), ('y', 0xffe040), ('t', 0x7a4a20)];
         let tree = vec![
-            Sprite::from_rows(&["..ggg..", ".gdggg.", "ggggdgg", "gykgykg", ".ggggg.", "..ggg..", "...t...", "..ttt..", ".t.t.t.", "t.....t"], &tp),
-            Sprite::from_rows(&["..ggg..", ".gggdg.", "ggdgggg", "gykgykg", ".ggggg.", "..ggg..", "...t...", "..ttt..", ".t.t.t.", ".t...t."], &tp),
+            fancy(&["..ggg..", ".gdggg.", "ggggdgg", "gykgykg", ".ggggg.", "..ggg..", "...t...", "..ttt..", ".t.t.t.", "t.....t"], &tp),
+            fancy(&["..ggg..", ".gggdg.", "ggdgggg", "gykgykg", ".ggggg.", "..ggg..", "...t...", "..ttt..", ".t.t.t.", ".t...t."], &tp),
         ];
         let ep = [('m', 0xc050e0), ('w', 0xffffff), ('k', 0x101010), ('r', 0xff4060)];
         let eater = vec![
-            Sprite::from_rows(&["..mmm..", ".mwmwm.", ".mkmkm.", "mmmmmmm", "m.m.m.m"], &ep),
-            Sprite::from_rows(&["..mmm..", ".mwmwm.", ".mkmkm.", "mmrrrmm", ".m.m.m."], &ep),
+            fancy(&["..mmm..", ".mwmwm.", ".mkmkm.", "mmmmmmm", "m.m.m.m"], &ep),
+            fancy(&["..mmm..", ".mwmwm.", ".mkmkm.", "mmrrrmm", ".m.m.m."], &ep),
         ];
-        let ball = Sprite::from_rows(&["..cc..", ".cwcc.", "cwwccc", "cccccb", ".ccbb.", "..bb.."], &[('c', 0x80e0ff), ('w', 0xffffff), ('b', 0x4090c0)]);
-        let witch = Sprite::from_rows(&["...k...", "..kkk..", ".kkkkk.", "kkkkkkk", "..gyg..", "..ggg..", ".ppppp.", "ppppppp", ".ppppp.", ".p...p.", "ooooooo"],
+        let ball = crystal_ball();
+        let witch = fancy(&["...k...", "..kkk..", ".kkkkk.", "kkkkkkk", "..gyg..", "..ggg..", ".ppppp.", "ppppppp", ".ppppp.", ".p...p.", "ooooooo"],
             &[('k', 0x202020), ('g', 0x60c040), ('y', 0xffff40), ('p', 0x7030a0), ('o', 0x9a6a30)]);
-        let hat_img = Sprite::from_rows(&["..r..", ".rsr.", ".rrr.", "rrrrr"], &[('r', 0xa040e0), ('s', 0xffff80)]);
-        let pot_img = Sprite::from_rows(&[".yyy.", "ooooo", "oyyyo", "ooooo", ".ooo."], &[('o', 0xd07820), ('y', 0xffd040)]);
+        let hat_img = fancy(&["..r..", ".rsr.", ".rrr.", "rrrrr"], &[('r', 0xa040e0), ('s', 0xffff80)]);
+        let pot_img = fancy(&[".yyy.", "ooooo", "oyyyo", "ooooo", ".ooo."], &[('o', 0xd07820), ('y', 0xffd040)]);
         let s_gem = ["c6", "d6", "e6", "g6", "a6", "c7", "d7", "e7"].iter()
             .map(|n| Sample::tone(Wave::Square, audio::note_hz(n), 0.035, 0.22)).collect();
         let s_title = Tune::parse(
@@ -338,7 +351,7 @@ impl Gems {
             s_title,
             bear_img, tree, eater, ball, witch, hat_img, pot_img,
         };
-        g.particles.gravity = 90.0;
+        g.particles.gravity = 180.0;
         g.load(0, 0);
         let mut audio = Audio::open();
         audio.play_loop(1, &g.s_title, 1.0);
@@ -438,8 +451,8 @@ impl Gems {
         if self.mode != Mode::Play { return; }
         self.mode = Mode::Dying(1.6);
         let (sx, sy) = project(self.bear.0, self.bear.1, self.bear_h);
-        self.particles.burst(sx as f32, sy as f32 - 4.0, 30, 60.0, 1.0, 0x9a5a28);
-        self.particles.burst(sx as f32, sy as f32 - 4.0, 12, 40.0, 1.0, 0xffffff);
+        self.particles.burst(sx as f32, sy as f32 - 8.0, 40, 120.0, 1.0, 0x9a5a28);
+        self.particles.burst(sx as f32, sy as f32 - 8.0, 16, 80.0, 1.0, 0xffffff);
         self.audio.stop(2);
         self.audio.play(&self.s_die, 1.0);
     }
@@ -450,7 +463,7 @@ impl Gems {
         let (sx, sy) = project(x, y, f.height(&self.map));
         let (points, color) = match f.kind { Kind::Eater => (500, 0xc050e0), Kind::Tree => (1000, 0x38a040), Kind::Ball => (1500, 0x80e0ff), Kind::Witch => (3000, 0x7030a0) };
         self.add(points);
-        self.particles.burst(sx as f32, sy as f32 - 4.0, 20, 50.0, 0.7, color);
+        self.particles.burst(sx as f32, sy as f32 - 8.0, 30, 100.0, 0.7, color);
         self.say(&format!("{points}"));
         self.audio.play(&self.s_kill, 1.0);
     }
@@ -460,6 +473,10 @@ impl Gems {
         self.left -= 1;
         self.gems_changed = true;
         if by_bear {
+            let g = &self.gems[i];
+            let (sx, sy) = project(g.x, g.y, g.h as f32);
+            let c = GEM_COLORS[i % GEM_COLORS.len()];
+            self.particles.burst(sx as f32, sy as f32 - 2.0, 4, 40.0, 0.3, c);
             self.took_any = true;
             self.add(10);
             self.gem_step = if self.gem_clock > 0.0 { (self.gem_step + 1) % self.s_gem.len() } else { 0 };
@@ -546,7 +563,7 @@ impl Gems {
             self.add(1000);
             self.say("HONEY 1000");
             let (sx, sy) = project(self.bear.0, self.bear.1, self.bear_h);
-            self.particles.burst(sx as f32, sy as f32 - 6.0, 16, 40.0, 0.6, GOLD);
+            self.particles.burst(sx as f32, sy as f32 - 12.0, 24, 80.0, 0.6, GOLD);
             self.audio.play(&self.s_pot, 1.0);
         }
 
@@ -655,7 +672,7 @@ impl Gems {
                 self.bees = None;
                 self.bees_done = true;
                 self.audio.stop(2);
-                self.particles.burst(sx as f32, sy as f32, 20, 50.0, 0.7, GOLD);
+                self.particles.burst(sx as f32, sy as f32, 30, 100.0, 0.7, GOLD);
                 self.add(2000);
                 self.say("2000");
                 self.audio.play(&self.s_kill, 1.0);
@@ -667,26 +684,55 @@ impl Gems {
 
     // ---------- drawing ----------
 
-    fn draw_block(&self, f: &mut Frame, x: i32, y: i32, look: &Look) {
+    /// Night falling behind the castle, with stars that twinkle.
+    fn draw_sky(&self, f: &mut Frame) {
+        for y in 0..H { f.hline(0, y, W, mix(0x04020c, 0x1c1240, y as f32 / H as f32)); }
+        let mut r = Rng::new(7);
+        for k in 0..90 {
+            let (x, y) = (r.below(W as u32) as i32, r.below(H as u32) as i32);
+            let glow = ((self.time * (0.7 + r.float() * 2.0) + k as f32).sin() * 0.5 + 0.5) * 0.8 + 0.2;
+            let c = tint(if k % 7 == 0 { 0xc0d0ff } else { 0xffffff }, glow * 0.7);
+            f.put(x, y, c);
+            if k % 11 == 0 && glow > 0.85 {
+                let d = tint(c, 0.5);
+                f.put(x - 1, y, d); f.put(x + 1, y, d); f.put(x, y - 1, d); f.put(x, y + 1, d);
+            }
+        }
+    }
+
+    /// A block: a tiled top, and below it the walls we see, laid in brick
+    /// courses and darker further down.
+    fn draw_block(&self, f: &mut Frame, x: i32, y: i32, look: &Look, walls: &Walls) {
         let Some(h) = self.map.at(x, y) else { return };
-        let cx = OX + (x - y) * 8;
-        let cy = OY + (x + y + 1) * 4 - h * HZ;
+        let cx = OX + (x - y) * HALF_W;
+        let cy = OY + (x + y + 1) * HALF_H - h * HZ;
         let below = |nx: i32, ny: i32| -> i32 {
             let nh = self.map.at(nx, ny).unwrap_or(BASE);
             if nh < h { (h - nh) * HZ } else { 0 }
         };
         let (dl, dr) = (below(x, y + 1), below(x + 1, y));
-        for i in 0..16 {
-            let d = i.min(15 - i);
+        let (lit, seam) = (tint(look.top, 1.08), tint(look.top, 0.86));
+        for i in 0..HALF_W * 2 {
+            let d = i.min(HALF_W * 2 - 1 - i);
             let (top, bot) = (cy - (d / 2 + 1), cy + d / 2);
-            f.vline(cx - 8 + i, top, bot - top + 1, look.top);
-            let depth = if i < 8 { dl } else { dr };
-            if depth > 0 { f.vline(cx - 8 + i, bot + 1, depth, if i < 8 { look.left } else { look.right }); }
+            let px = cx - HALF_W + i;
+            f.vline(px, top, bot - top + 1, look.top);
+            if d >= HALF_W / 2 {
+                let e = d - HALF_W / 2;
+                f.vline(px, cy - (e / 2 + 1), e / 2 * 2 + 2, lit);
+            }
+            f.put(px, bot, seam);
+            let (depth, face, col) = if i < HALF_W { (dl, &walls.left, i) } else { (dr, &walls.right, i - HALF_W) };
+            for r in 0..depth.min(WALL_MAX) {
+                let joint = (col + if (r / 4) % 2 == 1 { 4 } else { 0 }) % 8 == 0;
+                let (plain, mortar) = face[r as usize];
+                f.put(px, bot + 1 + r, if r % 4 == 3 || joint { mortar } else { plain });
+            }
         }
         // A rim where the block stands above the one behind it.
         let higher = |nx: i32, ny: i32| self.map.at(nx, ny).map(|nh| nh < h).unwrap_or(true);
-        if higher(x - 1, y) { for i in 0..8 { f.put(cx - 8 + i, cy - (i / 2 + 1), look.rim); } }
-        if higher(x, y - 1) { for i in 8..16 { f.put(cx - 8 + i, cy - ((15 - i) / 2 + 1), look.rim); } }
+        if higher(x - 1, y) { for i in 0..HALF_W { f.put(cx - HALF_W + i, cy - (i / 2 + 1), look.rim); } }
+        if higher(x, y - 1) { for i in HALF_W..HALF_W * 2 { f.put(cx - HALF_W + i, cy - ((HALF_W * 2 - 1 - i) / 2 + 1), look.rim); } }
     }
 
     /// Where on the back-to-front sweep a thing standing at (x, y) is
@@ -700,6 +746,7 @@ impl Gems {
 
     fn draw_world(&mut self, f: &mut Frame) {
         let look = &LOOKS[self.castle % LOOKS.len()];
+        let walls = Walls::new(look);
         // The things to draw between the blocks: (order, what, index).
         let mut things: Vec<(i32, u8, usize)> = Vec::new();
         let playing = !matches!(self.mode, Mode::Title);
@@ -720,14 +767,19 @@ impl Gems {
         for s in 0..(2 * N - 1) {
             for x in (s - N + 1).max(0)..=s.min(N - 1) {
                 let y = s - x;
-                self.draw_block(f, x, y, look);
+                self.draw_block(f, x, y, look, &walls);
                 for &i in &self.by_cell[(y * N + x) as usize] {
                     let g = &self.gems[i];
                     if !g.alive { continue; }
                     let (sx, sy) = project(g.x, g.y, g.h as f32);
                     let c = GEM_COLORS[(i + (self.time * 3.0) as usize / 4) % GEM_COLORS.len()];
-                    f.rect(sx - 1, sy, 2, 1, c);
-                    if (i * 7 + (self.time * 8.0) as usize) % 23 == 0 { f.put(sx, sy - 1, WHITE); }
+                    f.put(sx, sy - 1, mix(c, WHITE, 0.6));
+                    f.hline(sx - 1, sy, 3, c);
+                    f.put(sx, sy + 1, tint(c, 0.6));
+                    if (i * 7 + (self.time * 8.0) as usize) % 29 == 0 {
+                        f.hline(sx - 2, sy, 5, WHITE);
+                        f.vline(sx, sy - 2, 5, WHITE);
+                    }
                 }
             }
             while next < things.len() && things[next].0 <= s {
@@ -739,24 +791,37 @@ impl Gems {
         while next < things.len() { let (_, what, i) = things[next]; self.draw_thing(f, what, i); next += 1; }
         if let Some(b) = &self.bees {
             let (sx, sy) = project(b.x, b.y, b.h);
-            for k in 0..9 {
+            for k in 0..10 {
                 let a = self.time * (5.0 + k as f32) + k as f32 * 1.7;
-                let (px, py) = (sx + (a.cos() * 6.0) as i32, sy + ((a * 1.3).sin() * 3.0) as i32);
-                f.rect(px, py, 2, 1, if k % 3 == 0 { 0x202020 } else { 0xffd020 });
+                let (px, py) = (sx + (a.cos() * 12.0) as i32, sy + ((a * 1.3).sin() * 6.0) as i32);
+                let flap = ((self.time * 30.0) as i32 + k) % 2 == 0;
+                f.put(px, py, 0xffd020);
+                f.put(px + 1, py, 0x202020);
+                f.put(px + 2, py, 0xffd020);
+                f.put(px + 1, py - 1, if flap { 0xffffff } else { 0x9090a0 });
             }
         }
     }
 
     fn draw_thing(&self, f: &mut Frame, what: u8, i: usize) {
+        let feet = |f: &mut Frame, s: &Sprite, sx: i32, sy: i32, lift: i32, flip: bool| f.blit_flip(s, sx - s.w / 2, sy - s.h + 2 - lift, flip);
         match what {
             0 => {
                 let (sx, sy) = project(self.bear.0, self.bear.1, self.bear_h);
-                let z = if self.jump > 0.0 { ((1.0 - self.jump / JUMP) * std::f32::consts::PI).sin() * 11.0 } else { 0.0 } as i32;
+                let z = if self.jump > 0.0 { ((1.0 - self.jump / JUMP) * std::f32::consts::PI).sin() * 22.0 } else { 0.0 } as i32;
+                shadow(f, sx, sy, if z > 8 { 4 } else { 6 });
                 let img = if self.jump > 0.0 { &self.bear_img[2] } else if self.walking > 0.0 && (self.walking * 8.0) as i32 % 2 == 1 { &self.bear_img[1] } else { &self.bear_img[0] };
-                if z > 0 { f.rect(sx - 2, sy - 1, 5, 1, 0x000000); }
+                if self.hat_time > 0.0 {
+                    // The hat's magic, circling.
+                    for k in 0..12 {
+                        let a = self.time * 3.0 + k as f32 * 0.52;
+                        let (px, py) = (sx + (a.cos() * 11.0) as i32, sy - 8 - z + (a.sin() * 5.0) as i32);
+                        f.rect(px, py, 2, 1, if k % 2 == 0 { 0xc070ff } else { GOLD });
+                    }
+                }
+                feet(f, img, sx, sy, z, self.face_left);
                 let blink = self.hat_time > 0.0 && self.hat_time < 2.0 && (self.time * 10.0) as i32 % 2 == 0;
-                f.blit_flip(img, sx - 3, sy - 8 - z, self.face_left);
-                if self.hat_time > 0.0 && !blink { f.blit(&self.hat_img, sx - 2, sy - 12 - z); }
+                if self.hat_time > 0.0 && !blink { f.blit(&self.hat_img, sx - self.hat_img.w / 2, sy - img.h - self.hat_img.h + 6 - z); }
             }
             1 => {
                 let fo = &self.foes[i];
@@ -765,38 +830,190 @@ impl Gems {
                 let step = (self.time * 6.0) as usize % 2;
                 let left = fo.to.0 < fo.from.0 || fo.to.1 > fo.from.1;
                 match fo.kind {
-                    Kind::Eater => { let img = &self.eater[if fo.eating > 0.0 { (self.time * 10.0) as usize % 2 } else { 0 }]; f.blit_flip(img, sx - 3, sy - 4, left); }
-                    Kind::Tree => f.blit_flip(&self.tree[step], sx - 3, sy - 9, left),
-                    Kind::Ball => f.blit(&self.ball, sx - 3, sy - 5),
-                    Kind::Witch => f.blit_flip(&self.witch, sx - 3, sy - 10 - ((self.time * 4.0).sin() * 2.0) as i32, left),
+                    Kind::Eater => {
+                        shadow(f, sx, sy, 6);
+                        feet(f, &self.eater[if fo.eating > 0.0 { (self.time * 10.0) as usize % 2 } else { 0 }], sx, sy, 0, left);
+                    }
+                    Kind::Tree => { shadow(f, sx, sy, 7); feet(f, &self.tree[step], sx, sy, 0, left); }
+                    Kind::Ball => {
+                        shadow(f, sx, sy, 6);
+                        feet(f, &self.ball, sx, sy, 0, false);
+                        let a = self.time * 7.0;
+                        f.put(sx + (a.cos() * 3.0) as i32, sy - 7 + (a.sin() * 3.0) as i32, WHITE);
+                    }
+                    Kind::Witch => {
+                        shadow(f, sx, sy, 5);
+                        feet(f, &self.witch, sx, sy, 6 + ((self.time * 4.0).sin() * 3.0) as i32, left);
+                    }
                 }
             }
             2 => if let Some(c) = self.hat {
                 let (sx, sy) = project(c.0 as f32 + 0.5, c.1 as f32 + 0.5, self.cell_h(c) as f32);
-                f.blit(&self.hat_img, sx - 2, sy - 4 - ((self.time * 3.0).sin() * 1.5) as i32);
+                shadow(f, sx, sy, 4);
+                feet(f, &self.hat_img, sx, sy, 3 + ((self.time * 3.0).sin() * 2.0) as i32, false);
             },
             3 => if let Some(c) = self.pot {
                 let (sx, sy) = project(c.0 as f32 + 0.5, c.1 as f32 + 0.5, self.cell_h(c) as f32);
-                f.blit(&self.pot_img, sx - 2, sy - 5);
+                shadow(f, sx, sy, 5);
+                feet(f, &self.pot_img, sx, sy, 0, false);
             },
             _ => {}
         }
     }
 
     fn draw_hud(&self, f: &mut Frame) {
+        let rim = LOOKS[self.castle].rim;
         f.rect(0, 0, W, TOP, 0x000000);
-        f.text_big(2, 1, &format!("SCORE {:06}", self.score), TEXT);
+        f.hline(0, TOP - 1, W, tint(rim, 0.4));
+        f.text_scaled(4, 2, &format!("SCORE {:06}", self.score), TEXT, true, 2);
         let hi = format!("HI {:06}", self.high.max(self.score));
-        f.text_big(W - 2 - Frame::text_width(&hi, true, 1), 1, &hi, 0x9090b0);
+        f.text_scaled(W - 4 - Frame::text_width(&hi, true, 2), 2, &hi, 0x9090b0, true, 2);
         let where_ = format!("CASTLE {} WAVE {}", self.castle + 1 + self.round as usize * CASTLES.len(), self.wave + 1);
-        f.text(2, 10, &where_, LOOKS[self.castle].rim);
+        f.text_scaled(4, 19, &where_, rim, false, 2);
         let gems = format!("GEMS {}", self.left);
-        f.text(W / 2 - Frame::text_width(&gems, false, 1) / 2, 10, &gems, WHITE);
+        f.text_scaled(W / 2 - Frame::text_width(&gems, false, 2) / 2, 19, &gems, WHITE, false, 2);
         let bears = format!("BEARS {}", self.lives.saturating_sub(1));
-        f.text(W - 2 - Frame::text_width(&bears, false, 1), 10, &bears, 0xd8a060);
+        f.text_scaled(W - 4 - Frame::text_width(&bears, false, 2), 19, &bears, 0xd8a060, false, 2);
         if self.hat_time > 0.0 {
-            let w = (self.hat_time / HAT_TIME * 40.0) as i32;
-            f.rect(W / 2 - 20, 15, w, 1, 0xa040e0);
+            let w = (self.hat_time / HAT_TIME * 80.0) as i32;
+            f.rect(W / 2 - 40, TOP - 3, w, 2, 0xa040e0);
+        }
+    }
+}
+
+/// The tallest wall there is: from the highest block to the foundations.
+const WALL_MAX: i32 = (9 - BASE) * HZ;
+
+/// A wall's colours down its height, plain brick and mortar, worked out
+/// once a frame instead of once a pixel.
+struct Walls { left: Vec<(Rgb, Rgb)>, right: Vec<(Rgb, Rgb)> }
+
+impl Walls {
+    fn new(look: &Look) -> Walls {
+        let down = |face: Rgb| (0..WALL_MAX).map(|r| {
+            let k = 1.0 - (r as f32 / 90.0).min(0.35);
+            (tint(face, k), tint(face, 0.74 * k))
+        }).collect();
+        Walls { left: down(look.left), right: down(look.right) }
+    }
+}
+
+/// A colour made brighter or darker by a factor.
+fn tint(c: Rgb, k: f32) -> Rgb {
+    let (r, g, b) = parts(c);
+    let s = |v: u8| (v as f32 * k).round().clamp(0.0, 255.0) as u8;
+    rgb(s(r), s(g), s(b))
+}
+
+/// The colour `t` of the way from `a` to `b`.
+fn mix(a: Rgb, b: Rgb, t: f32) -> Rgb {
+    let ((ar, ag, ab), (br, bg, bb)) = (parts(a), parts(b));
+    let l = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round().clamp(0.0, 255.0) as u8;
+    rgb(l(ar, br), l(ag, bg), l(ab, bb))
+}
+
+/// A soft dark oval on the floor under something standing there.
+fn shadow(f: &mut Frame, sx: i32, sy: i32, rx: i32) {
+    let ry = (rx / 2).max(1);
+    for dy in -ry..=ry {
+        let half = ((1.0 - (dy * dy) as f32 / (ry * ry) as f32).max(0.0).sqrt() * rx as f32) as i32;
+        for dx in -half..=half { let c = f.get(sx + dx, sy + dy); f.put(sx + dx, sy + dy, tint(c, 0.55)); }
+    }
+}
+
+/// Twice the size, with the diagonal steps smoothed (the Scale2x rule).
+fn scale2x(s: &Sprite) -> Sprite {
+    let (w, h) = (s.w, s.h);
+    let at = |x: i32, y: i32| if x < 0 || y < 0 || x >= w || y >= h { 0 } else { s.px[(y * w + x) as usize] };
+    let mut px = vec![0u32; (w * h * 4) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            let (p, a, b, c, d) = (at(x, y), at(x, y - 1), at(x + 1, y), at(x - 1, y), at(x, y + 1));
+            let e0 = if c == a && c != d && a != b { a } else { p };
+            let e1 = if a == b && a != c && b != d { b } else { p };
+            let e2 = if d == c && d != b && c != a { c } else { p };
+            let e3 = if b == d && b != a && d != c { d } else { p };
+            let (i, w2) = ((y * 2 * w * 2 + x * 2) as usize, (w * 2) as usize);
+            px[i] = e0;
+            px[i + 1] = e1;
+            px[i + w2] = e2;
+            px[i + w2 + 1] = e3;
+        }
+    }
+    Sprite { w: w * 2, h: h * 2, px }
+}
+
+/// Light from above and the left: edges facing it lighter, the others darker.
+fn shade(s: &Sprite) -> Sprite {
+    let on = |x: i32, y: i32| x >= 0 && y >= 0 && x < s.w && y < s.h && s.px[(y * s.w + x) as usize] >> 24 != 0;
+    let mut out = s.clone();
+    for y in 0..s.h {
+        for x in 0..s.w {
+            let i = (y * s.w + x) as usize;
+            if s.px[i] >> 24 == 0 { continue; }
+            let k = if !on(x, y - 1) || !on(x - 1, y) { 1.25 } else if !on(x, y + 1) || !on(x + 1, y) { 0.72 } else { 1.0 };
+            out.px[i] = 0xff00_0000 | tint(s.px[i] & 0xff_ffff, k);
+        }
+    }
+    out
+}
+
+/// A one-pixel outline in `c` round the sprite.
+fn outline(s: &Sprite, c: Rgb) -> Sprite {
+    let (w, h) = (s.w + 2, s.h + 2);
+    let on = |x: i32, y: i32| x >= 1 && y >= 1 && x <= s.w && y <= s.h && s.px[((y - 1) * s.w + x - 1) as usize] >> 24 != 0;
+    let mut px = vec![0u32; (w * h) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            px[(y * w + x) as usize] = if on(x, y) { s.px[((y - 1) * s.w + x - 1) as usize] }
+                else if on(x - 1, y) || on(x + 1, y) || on(x, y - 1) || on(x, y + 1) { 0xff00_0000 | c } else { 0 };
+        }
+    }
+    Sprite { w, h, px }
+}
+
+/// A small drawing made ready for the big screen: doubled, lit, outlined.
+fn fancy(rows: &[&str], palette: &[(char, Rgb)]) -> Sprite {
+    outline(&shade(&scale2x(&Sprite::from_rows(rows, palette))), 0x100818)
+}
+
+/// The crystal ball: a lit sphere with a bright spot.
+fn crystal_ball() -> Sprite {
+    let (n, r) = (13, 6.5f32);
+    let mut px = vec![0u32; (n * n) as usize];
+    for y in 0..n {
+        for x in 0..n {
+            let (dx, dy) = (x as f32 - 6.0, y as f32 - 6.0);
+            let d2 = dx * dx + dy * dy;
+            if d2 > r * r { continue; }
+            let nz = (1.0 - d2 / (r * r)).sqrt();
+            let lit = (-0.5 * dx / r - 0.6 * dy / r + 0.62 * nz).max(0.0);
+            let mut c = mix(0x184860, 0x9ae8ff, lit);
+            if (dx + 2.5).powi(2) + (dy + 2.5).powi(2) < 2.2 { c = WHITE; }
+            if (dx - 2.0).powi(2) + (dy - 3.0).powi(2) < 1.2 { c = mix(c, WHITE, 0.5); }
+            px[(y * n + x) as usize] = 0xff00_0000 | c;
+        }
+    }
+    outline(&Sprite { w: n, h: n, px }, 0x0c1830)
+}
+
+/// Big letters in a crystal gradient, with a light sweeping across them
+/// and a shadow under them.
+fn fancy_text(f: &mut Frame, cx: i32, y: i32, s: &str, scale: i32, time: f32) {
+    let (w, h) = (Frame::text_width(s, true, scale), 7 * scale);
+    let mut m = Frame::new(w + 1, h + 1);
+    m.text_scaled(0, 0, s, WHITE, true, scale);
+    let x0 = cx - w / 2;
+    let lit = |xx: i32, yy: i32| m.get(xx, yy) != BLACK;
+    for yy in 0..h { for xx in 0..w { if lit(xx, yy) { f.put(x0 + xx + scale / 2 + 1, y + yy + scale / 2 + 1, 0x000000); } } }
+    let band = ((time * 0.5).fract() * (w + h) as f32 * 1.6) as i32 - h;
+    for yy in 0..h {
+        for xx in 0..w {
+            if !lit(xx, yy) { continue; }
+            let mut c = mix(0xe8f8ff, 0x6070ff, yy as f32 / h as f32);
+            let d = (xx + yy - band).abs();
+            if d < scale * 2 { c = mix(c, WHITE, 1.0 - d as f32 / (scale * 2) as f32); }
+            f.put(x0 + xx, y + yy, c);
         }
     }
 }
@@ -848,43 +1065,42 @@ impl Game for Gems {
     }
 
     fn draw(&mut self, f: &mut Frame) {
-        f.clear(0x000000);
+        self.draw_sky(f);
         self.draw_world(f);
         self.particles.draw(f, 0, 0);
         if self.mode == Mode::Title {
-            f.dim(0.45);
-            let bob = ((self.time * 2.0).sin() * 3.0) as i32;
-            f.text_centered(W / 2, 30 + bob, "GEMS", GEM_COLORS[(self.time * 4.0) as usize % 4], true, 5);
-            f.text_centered(W / 2, 72, "A TRIBUTE TO CRYSTAL CASTLES", TEXT, true, 1);
-            f.text_centered(W / 2, 82, "ATARI 1983", 0x9090b0, false, 1);
-            f.blit_scaled(&self.bear_img[0], W / 2 - 14, 100, 4, false);
-            f.text_centered(W / 2, 146, &format!("HIGH SCORE {:06}", self.high), TEXT, true, 1);
-            if (self.time * 2.0) as i32 % 2 == 0 { f.text_centered(W / 2, 162, "PRESS SPACE", GOLD, true, 1); }
-            f.text_centered(W / 2, 178, "ARROWS WALK  TWO FOR DIAGONALS  SPACE JUMPS", 0x8080a0, false, 1);
-            f.text(W - 4 - Frame::text_width(VERSION, false, 1), H - 6, VERSION, 0x505070);
+            f.dim(0.5);
+            fancy_text(f, W / 2, 48 + ((self.time * 2.0).sin() * 5.0) as i32, "GEMS", 12, self.time);
+            f.text_centered(W / 2, 150, "A TRIBUTE TO CRYSTAL CASTLES", TEXT, true, 2);
+            f.text_centered(W / 2, 170, "ATARI 1983", 0x9090b0, false, 2);
+            f.blit_scaled(&self.bear_img[0], W / 2 - 26, 190, 4, false);
+            f.text_centered(W / 2, 276, &format!("HIGH SCORE {:06}", self.high), TEXT, true, 2);
+            if (self.time * 2.0) as i32 % 2 == 0 { f.text_centered(W / 2, 302, "PRESS SPACE", GOLD, true, 2); }
+            f.text_centered(W / 2, 336, "ARROWS WALK  TWO FOR DIAGONALS  SPACE JUMPS", 0x8080a0, false, 2);
+            f.text(W - 4 - Frame::text_width(VERSION, false, 1), H - 7, VERSION, 0x505070);
             return;
         }
         self.draw_hud(f);
-        if let Some((s, _)) = &self.note { f.text_centered(W / 2, TOP + 4, s, GOLD, true, 1); }
+        if let Some((s, _)) = &self.note { f.text_centered(W / 2, TOP + 8, s, GOLD, true, 2); }
         match self.mode {
             Mode::Clear(_) => {
                 f.dim(0.6);
-                f.text_centered(W / 2, 80, "WAVE CLEAR", GOLD, true, 2);
-                if self.last_bonus > 0 { f.text_centered(W / 2, 100, &format!("LAST GEM BONUS {}", self.last_bonus), TEXT, true, 1); }
-                if self.wave == 2 { f.text_centered(W / 2, 114, &format!("ON TO {}", CASTLES[(self.castle + 1) % CASTLES.len()].name), TEXT, true, 1); }
+                fancy_text(f, W / 2, 140, "WAVE CLEAR", 5, self.time);
+                if self.last_bonus > 0 { f.text_centered(W / 2, 196, &format!("LAST GEM BONUS {}", self.last_bonus), TEXT, true, 2); }
+                if self.wave == 2 { f.text_centered(W / 2, 222, &format!("ON TO {}", CASTLES[(self.castle + 1) % CASTLES.len()].name), GOLD, true, 2); }
             }
             Mode::Warp(_) => {
                 f.dim(0.5);
-                f.text_centered(W / 2, 80, "WARP", GEM_COLORS[(self.time * 8.0) as usize % 4], true, 3);
-                f.text_centered(W / 2, 108, "TO CASTLE 3  BONUS 5000", TEXT, true, 1);
+                fancy_text(f, W / 2, 130, "WARP", 9, self.time * 4.0);
+                f.text_centered(W / 2, 212, "TO CASTLE 3  BONUS 5000", TEXT, true, 2);
             }
             Mode::Over(_) => {
                 f.dim(0.5);
-                f.text_centered(W / 2, 80, "GAME OVER", 0xe03030, true, 2);
-                if self.score >= self.high && self.score > 0 { f.text_centered(W / 2, 100, "NEW HIGH SCORE", GOLD, true, 1); }
+                f.text_centered(W / 2, 150, "GAME OVER", 0xe03030, true, 4);
+                if self.score >= self.high && self.score > 0 { f.text_centered(W / 2, 196, "NEW HIGH SCORE", GOLD, true, 2); }
             }
             Mode::Play if self.wave_time < 2.5 => {
-                f.text_centered(W / 2, H - 12, CASTLES[self.castle].name, LOOKS[self.castle].rim, true, 1);
+                f.text_centered(W / 2, H - 22, CASTLES[self.castle].name, LOOKS[self.castle].rim, true, 2);
             }
             _ => {}
         }
