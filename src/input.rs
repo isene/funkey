@@ -54,16 +54,25 @@ impl Input {
                         None => { self.held.insert(key, Held { last: now, repeats: 1 }); }
                     }
                 }
-                KeyState::Pressed => match self.held.get_mut(&key) {
-                    // Without release reports a press within the window is a repeat.
-                    Some(h) if self.exact || now.duration_since(h.last) < hold_for(h.repeats) => { h.last = now; h.repeats += 1; }
-                    _ => { self.held.insert(key, Held { last: now, repeats: 0 }); self.pressed.push(key); }
-                },
+                KeyState::Pressed => self.press(key, now),
             }
         }
-        if !self.exact {
-            self.held.retain(|_, h| now.duration_since(h.last) < hold_for(h.repeats));
+        self.expire(now);
+    }
+
+    fn press(&mut self, key: Key, now: Instant) {
+        match self.held.get_mut(&key) {
+            // Without release reports a press within the window is a repeat.
+            Some(h) if (self.exact && releases(key)) || now.duration_since(h.last) < hold_for(h.repeats) => { h.last = now; h.repeats += 1; }
+            _ => { self.held.insert(key, Held { last: now, repeats: 0 }); self.pressed.push(key); }
         }
+    }
+
+    /// Let go of the keys whose repeats have stopped, where no release
+    /// report will come.
+    fn expire(&mut self, now: Instant) {
+        let exact = self.exact;
+        self.held.retain(|&k, h| (exact && releases(k)) || now.duration_since(h.last) < hold_for(h.repeats));
     }
 
     /// True when the terminal reports key releases, so `held` is exact.
@@ -128,6 +137,11 @@ impl Input {
     }
 }
 
+/// A terminal that reports releases still sends none for Enter, Tab and
+/// Backspace (the kitty protocol keeps them plain, so a shell stays
+/// usable after a crash). Those three are held on a timer even then.
+fn releases(key: Key) -> bool { !matches!(key, Key::Enter | Key::Tab | Key::Backspace) }
+
 fn hold_for(repeats: u32) -> Duration {
     if repeats == 0 { FIRST_HOLD } else { REPEAT_HOLD }
 }
@@ -172,6 +186,24 @@ mod tests {
         assert!(!i.tapped(Key::Up));
         i.held.remove(&Key::Up);
         assert!(!i.held(Key::Up));
+    }
+
+    #[test]
+    fn enter_is_pressed_again_though_its_release_never_comes() {
+        let mut i = Input::new();
+        i.exact = true;
+        let t0 = Instant::now();
+        i.press(Key::Enter, t0);
+        assert!(i.pressed(Key::Enter));
+        i.expire(t0 + Duration::from_millis(700));
+        assert!(!i.held(Key::Enter), "let go on the timer");
+        i.pressed.clear();
+        i.press(Key::Enter, t0 + Duration::from_millis(900));
+        assert!(i.pressed(Key::Enter), "a second Enter is a new press");
+        // A key with release reports stays held, with no timer.
+        i.press(Key::Up, t0);
+        i.expire(t0 + Duration::from_secs(5));
+        assert!(i.held(Key::Up));
     }
 
     #[test]
