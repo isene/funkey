@@ -7,6 +7,7 @@
 //!
 //! Left and Right turn, Up and Down climb and dive, W and S change speed,
 //! Space hands the controls back to the autopilot, Q quits.
+//! `SOAR_BENCH=<frames>` times the flight with no terminal.
 
 use funkey::*;
 
@@ -16,8 +17,14 @@ const MAP: usize = 1024;
 const MASK: usize = MAP - 1;
 const WATER: f32 = 0.34;
 const HSCALE: f32 = 260.0;
+/// The full map and four coarser copies of it.
+const LEVELS: usize = 5;
+/// Where the sun stands, as a heading.
+const SUN_AZ: f32 = 0.66;
+const ZENITH: Rgb = 0x3568b8;
+const HAZE: Rgb = 0xe6d2b4;
 /// The game's own version; the engine has its own.
-const VERSION: &str = "1.0";
+const VERSION: &str = "1.1";
 
 fn hash(x: i32, y: i32, seed: u32) -> f32 {
     let mut h = (x as u32).wrapping_mul(0x8da6b343) ^ (y as u32).wrapping_mul(0xd8163841) ^ seed.wrapping_mul(0xcb1ab31f);
@@ -70,7 +77,57 @@ fn scale(c: Rgb, k: f32) -> Rgb {
     rgb((r as f32 * k).min(255.0) as u8, (g as f32 * k).min(255.0) as u8, (b as f32 * k).min(255.0) as u8)
 }
 
-struct Terrain { height: Vec<f32>, color: Vec<Rgb>, clouds: Vec<f32> }
+/// The map at one level of detail. Each level up is half as fine, every
+/// cell the average of four below it, so far ground is read from a map
+/// as coarse as the steps the rays take there.
+struct Level { size: usize, height: Vec<f32>, color: Vec<Rgb> }
+
+impl Level {
+    fn halve(&self) -> Level {
+        let (s, n) = (self.size, self.size / 2);
+        let (mut height, mut color) = (Vec::with_capacity(n * n), Vec::with_capacity(n * n));
+        for y in 0..n {
+            for x in 0..n {
+                let i = [2 * y * s + 2 * x, 2 * y * s + 2 * x + 1, (2 * y + 1) * s + 2 * x, (2 * y + 1) * s + 2 * x + 1];
+                height.push(i.iter().map(|&j| self.height[j]).sum::<f32>() / 4.0);
+                let (mut r, mut g, mut b) = (0u32, 0u32, 0u32);
+                for &j in &i { let (cr, cg, cb) = parts(self.color[j]); r += cr as u32; g += cg as u32; b += cb as u32; }
+                color.push(rgb((r / 4) as u8, (g / 4) as u8, (b / 4) as u8));
+            }
+        }
+        Level { size: n, height, color }
+    }
+
+    /// The four cells around a point of the full map, and the weights
+    /// between them.
+    #[inline]
+    fn cell(&self, x: f32, y: f32) -> ([usize; 4], f32, f32) {
+        let k = self.size as f32 / MAP as f32;
+        let (x, y) = ((x + 0.5) * k - 0.5, (y + 0.5) * k - 0.5);
+        let (xi, yi) = (x.floor(), y.floor());
+        let m = self.size - 1;
+        let (x0, y0) = (xi as i64 as usize & m, yi as i64 as usize & m);
+        let (x1, y1) = ((x0 + 1) & m, (y0 + 1) & m);
+        let s = self.size;
+        ([y0 * s + x0, y0 * s + x1, y1 * s + x0, y1 * s + x1], x - xi, y - yi)
+    }
+
+    #[inline]
+    fn height_at(&self, x: f32, y: f32) -> f32 {
+        let (i, fx, fy) = self.cell(x, y);
+        let a = self.height[i[0]] + (self.height[i[1]] - self.height[i[0]]) * fx;
+        let b = self.height[i[2]] + (self.height[i[3]] - self.height[i[2]]) * fx;
+        a + (b - a) * fy
+    }
+
+    #[inline]
+    fn color_at(&self, x: f32, y: f32) -> Rgb {
+        let (i, fx, fy) = self.cell(x, y);
+        lerp(lerp(self.color[i[0]], self.color[i[1]], fx), lerp(self.color[i[2]], self.color[i[3]], fx), fy)
+    }
+}
+
+struct Terrain { levels: Vec<Level>, clouds: Vec<f32> }
 
 const CLOUD: usize = 256;
 
@@ -151,35 +208,28 @@ impl Terrain {
             }
         }
         let clouds = (0..CLOUD * CLOUD).map(|i| fbm((i % CLOUD) as f32 / CLOUD as f32 * 8.0, (i / CLOUD) as f32 / CLOUD as f32 * 8.0, 5, 5)).collect();
-        Terrain { height, color, clouds }
+        let mut levels = vec![Level { size: MAP, height, color }];
+        while levels.len() < LEVELS { let up = levels[levels.len() - 1].halve(); levels.push(up); }
+        Terrain { levels, clouds }
     }
 
-    /// The four cells around a point and the weights between them.
-    #[inline]
-    fn cell(&self, x: f32, y: f32) -> ([usize; 4], f32, f32) {
-        let (xi, yi) = (x.floor(), y.floor());
-        let (x0, y0) = (xi as i64 as usize & MASK, yi as i64 as usize & MASK);
-        let (x1, y1) = ((x0 + 1) & MASK, (y0 + 1) & MASK);
-        ([y0 * MAP + x0, y0 * MAP + x1, y1 * MAP + x0, y1 * MAP + x1], x - xi, y - yi)
+    /// The height at a point, `lod` levels up from the full map. Between
+    /// two levels both are read and mixed, so no seam shows where one
+    /// hands over to the next.
+    fn height(&self, x: f32, y: f32, lod: f32) -> f32 {
+        let l = (lod as usize).min(LEVELS - 1);
+        let a = self.levels[l].height_at(x, y);
+        let t = lod - l as f32;
+        if t <= 0.0 || l + 1 == LEVELS { return a; }
+        a + (self.levels[l + 1].height_at(x, y) - a) * t
     }
 
-    #[inline]
-    fn height_at(&self, c: &([usize; 4], f32, f32)) -> f32 {
-        let (i, fx, fy) = (c.0, c.1, c.2);
-        let a = self.height[i[0]] + (self.height[i[1]] - self.height[i[0]]) * fx;
-        let b = self.height[i[2]] + (self.height[i[3]] - self.height[i[2]]) * fx;
-        a + (b - a) * fy
-    }
-
-    #[inline]
-    fn color_at(&self, c: &([usize; 4], f32, f32)) -> Rgb {
-        let (i, fx, fy) = (c.0, c.1, c.2);
-        lerp(lerp(self.color[i[0]], self.color[i[1]], fx), lerp(self.color[i[2]], self.color[i[3]], fx), fy)
-    }
-
-    fn sample(&self, x: f32, y: f32) -> (f32, Rgb) {
-        let c = self.cell(x, y);
-        (self.height_at(&c), self.color_at(&c))
+    fn color(&self, x: f32, y: f32, lod: f32) -> Rgb {
+        let l = (lod as usize).min(LEVELS - 1);
+        let a = self.levels[l].color_at(x, y);
+        let t = lod - l as f32;
+        if t <= 0.0 || l + 1 == LEVELS { return a; }
+        lerp(a, self.levels[l + 1].color_at(x, y), t)
     }
 }
 
@@ -187,7 +237,12 @@ struct Soar {
     terrain: Terrain,
     x: f32, y: f32, alt: f32, yaw: f32, pitch: f32, speed: f32,
     auto: bool, idle: f32, time: f32,
-    ybuf: Vec<i32>,
+    /// Per column: the direction it looks along (sine, cosine), and the
+    /// row where its ground begins.
+    dirs: Vec<(f32, f32)>,
+    tops: Vec<i32>,
+    /// The ground, a column after a column, painted over the cores.
+    cols: Vec<Rgb>,
     audio: Audio,
 }
 
@@ -201,10 +256,63 @@ impl Soar {
         for _ in 0..22050 { x ^= x << 13; x ^= x >> 17; x ^= x << 5; let r = (x >> 16) as f32 / 32768.0 - 1.0; v += (r - v) * 0.08; wind.push((v * 12000.0) as i16); }
         audio.play_loop(1, &Sample::from_i16(wind), 0.4);
         Soar { terrain, x: 300.0, y: 200.0, alt: 90.0, yaw: 0.4, pitch: 0.0, speed: 26.0, auto: true, idle: 0.0, time: 0.0,
-            ybuf: vec![H; W as usize], audio }
+            dirs: vec![(0.0, 1.0); W as usize], tops: vec![H; W as usize], cols: vec![0; (W * H) as usize], audio }
     }
 
-    fn ground(&self) -> f32 { self.terrain.sample(self.x, self.y).0.max(WATER) * HSCALE }
+    fn ground(&self) -> f32 { self.terrain.height(self.x, self.y, 0.0).max(WATER) * HSCALE }
+
+    /// One column of ground, near to far, into `col` (top to bottom).
+    /// Returns the row where the ground begins.
+    fn column(&self, x: usize, col: &mut [Rgb], horizon: f32, focal: f32) -> i32 {
+        let k = (x as f32 + 0.5 - W as f32 / 2.0) / focal;
+        let (dx, dy) = self.dirs[x];
+        let ang = self.yaw + k.atan();
+        let toward = ((ang - SUN_AZ).cos()).max(0.0).powi(10);
+        let stretch = (1.0 + k * k).sqrt();
+        let far = 1400.0;
+        let mut z = 1.0f32;
+        let mut dz = 0.4f32;
+        let mut ymin = H;
+        // The colour at the top of the last span, while the ground runs
+        // on unbroken; a span shades from its own colour down to it.
+        let mut below: Option<(Rgb, f32)> = None;
+        while z < far {
+            let (px, py) = (self.x + dx * z * stretch, self.y + dy * z * stretch);
+            // Read the map as coarse as the step along the ground.
+            let lod = (dz * stretch).log2().max(0.0);
+            let mut h = self.terrain.height(px, py, lod);
+            let water = h < WATER;
+            if water { h = WATER; }
+            let fy = horizon + (self.alt - h * HSCALE) * focal / z;
+            let sy = fy as i32;
+            if sy < ymin {
+                let mut c = self.terrain.color(px, py, lod);
+                if water {
+                    // Waves and the sun's glitter on them.
+                    let wave = noise(px * 0.35 + self.time * 1.3, py * 0.35 - self.time * 0.9, 256, 3);
+                    let glint = toward * (wave - 0.35).clamp(0.0, 1.0) * 1.6;
+                    c = lerp(c, 0xfff4d0, glint.min(1.0));
+                    c = lerp(c, ZENITH, 0.25);
+                }
+                let c = lerp(c, HAZE, 1.0 - (-z / 620.0).exp());
+                let (y0, y1) = (sy.max(0), ymin.min(H));
+                match below {
+                    Some((b, by)) if by > fy => {
+                        for y in y0..y1 { col[y as usize] = lerp(c, b, (y as f32 - fy) / (by - fy)); }
+                    }
+                    _ => for y in y0..y1 { col[y as usize] = c; },
+                }
+                ymin = sy;
+                below = Some((c, fy));
+            } else {
+                below = None;
+            }
+            if ymin <= 0 { break; }
+            z += dz;
+            dz *= 1.005;
+        }
+        ymin
+    }
 }
 
 impl Game for Soar {
@@ -244,12 +352,14 @@ impl Game for Soar {
     fn draw(&mut self, f: &mut Frame) {
         let focal = W as f32 * 0.55;
         let horizon = H as f32 * 0.5 + self.pitch * focal;
-        let sun_az = 0.66f32;
-        let (zenith, haze) = (0x3568b8, 0xe6d2b4);
+        for x in 0..W as usize {
+            let ang = self.yaw + ((x as f32 + 0.5 - W as f32 / 2.0) / focal).atan();
+            self.dirs[x] = (ang.sin(), ang.cos());
+        }
         // Sky: a gradient, clouds, the sun.
         for y in 0..H {
             let t = ((horizon - y as f32) / (H as f32 * 0.9)).clamp(0.0, 1.0);
-            let c = lerp(haze, zenith, t.powf(0.8));
+            let c = lerp(HAZE, ZENITH, t.powf(0.8));
             f.hline(0, y, W, c);
         }
         let scroll = self.time * 24.0;
@@ -261,8 +371,8 @@ impl Game for Soar {
             if d > 12000.0 { continue; }
             let fade = (1.0 - d / 12000.0).clamp(0.0, 1.0);
             for x in 0..W {
-                let ang = self.yaw + ((x as f32 - W as f32 / 2.0) / focal).atan();
-                let (cx, cy) = (self.x + ang.sin() * d + scroll, self.y + ang.cos() * d);
+                let (sa, ca) = self.dirs[x as usize];
+                let (cx, cy) = (self.x + sa * d + scroll, self.y + ca * d);
                 let n = tex(&self.terrain.clouds, CLOUD, cx / 1900.0 * CLOUD as f32, cy / 1900.0 * CLOUD as f32);
                 let cover = ((n - 0.5) * 3.2).clamp(0.0, 1.0) * fade;
                 if cover > 0.0 {
@@ -271,7 +381,7 @@ impl Game for Soar {
                 }
             }
         }
-        let rel = (sun_az - self.yaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+        let rel = (SUN_AZ - self.yaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
         if rel.abs() < 1.2 {
             let sx = (W as f32 / 2.0 + rel.tan() * focal) as i32;
             let sy = (horizon - 0.19 * focal) as i32;
@@ -283,51 +393,31 @@ impl Game for Soar {
                 }
             }
         }
-        // The ground, a column at a time, near to far.
-        self.ybuf.fill(H);
-        let fog = haze;
-        let far = 1400.0;
-        for x in 0..W {
-            let k = (x as f32 + 0.5 - W as f32 / 2.0) / focal;
-            let ang = self.yaw + k.atan();
-            let (dx, dy) = (ang.sin(), ang.cos());
-            let stretch = (1.0 + k * k).sqrt();
-            let mut z = 1.0f32;
-            let mut dz = 0.4f32;
-            let mut ymin = H;
-            while z < far {
-                let (px, py) = (self.x + dx * z * stretch, self.y + dy * z * stretch);
-                let cell = self.terrain.cell(px, py);
-                let mut h = self.terrain.height_at(&cell);
-                let mut water = false;
-                if h < WATER {
-                    water = true;
-                    h = WATER;
-                }
-                let hz = h * HSCALE;
-                let sy = (horizon + (self.alt - hz) * focal / z) as i32;
-                if sy < ymin {
-                    let mut c = self.terrain.color_at(&cell);
-                    if water {
-                        // Waves and the sun's glitter on them.
-                        let wave = noise(px * 0.35 + self.time * 1.3, py * 0.35 - self.time * 0.9, 256, 3);
-                        let toward = ((ang - sun_az).cos()).max(0.0);
-                        let glint = toward.powi(10) * (wave - 0.35).clamp(0.0, 1.0) * 1.6;
-                        c = lerp(c, 0xfff4d0, glint.min(1.0));
-                        c = lerp(c, zenith, 0.25);
-                    }
-                    let t = 1.0 - (-z / 620.0).exp();
-                    let c = lerp(c, fog, t);
-                    let (y0, y1) = (sy.max(0), ymin.min(H));
-                    let w = W as usize;
-                    for y in y0..y1 { f.px[y as usize * w + x as usize] = c; }
-                    ymin = sy;
-                }
-                if ymin <= 0 { break; }
-                z += dz;
-                dz *= 1.005;
+        // The ground: strips of columns over the cores, each core taking
+        // the next strip when it is done.
+        let (w, h) = (W as usize, H as usize);
+        let mut cols = std::mem::take(&mut self.cols);
+        let mut tops = std::mem::take(&mut self.tops);
+        let strip = 8;
+        let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+        let next = std::sync::Mutex::new(cols.chunks_mut(h * strip).zip(tops.chunks_mut(strip)).enumerate());
+        let me = &*self;
+        std::thread::scope(|s| {
+            for _ in 0..threads {
+                s.spawn(|| loop {
+                    let job = next.lock().unwrap().next();
+                    let Some((i, (col, top))) = job else { break };
+                    for (k, t) in top.iter_mut().enumerate() { *t = me.column(i * strip + k, &mut col[k * h..(k + 1) * h], horizon, focal); }
+                });
+            }
+        });
+        for y in 0..h {
+            for x in 0..w {
+                if y as i32 >= tops[x] { f.px[y * w + x] = cols[x * h + y]; }
             }
         }
+        self.cols = cols;
+        self.tops = tops;
         let alt = (self.alt - self.ground()).max(0.0);
         f.text_big(8, H - 14, &format!("ALT {:4.0}  SPD {:3.0}{}", alt, self.speed, if self.auto { "  AUTO" } else { "" }), 0xe8e0d0);
         f.text(W - 4 - Frame::text_width(VERSION, false, 1), H - 7, VERSION, 0x9a9080);
@@ -335,5 +425,17 @@ impl Game for Soar {
 }
 
 fn main() {
-    run(&mut Soar::new(), Config { width: W, height: H, fps: 30 });
+    let mut game = Soar::new();
+    // SOAR_BENCH=<frames> flies that many frames with no terminal and
+    // prints the time one takes.
+    if let Ok(n) = std::env::var("SOAR_BENCH") {
+        let n: u32 = n.parse().unwrap_or(300);
+        let mut f = Frame::new(W, H);
+        let input = Input::new();
+        let t0 = std::time::Instant::now();
+        for _ in 0..n { game.update(&input, 1.0 / 30.0); game.draw(&mut f); }
+        eprintln!("{:.2} ms a frame at {}x{} over {} frames", t0.elapsed().as_secs_f64() * 1000.0 / n as f64, W, H, n);
+        return;
+    }
+    run(&mut game, Config { width: W, height: H, fps: 30 });
 }
