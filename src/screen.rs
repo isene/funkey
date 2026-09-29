@@ -143,7 +143,7 @@ impl Screen {
             let (r, g, b) = parts(p);
             self.rgba.extend_from_slice(&[r, g, b, 255]);
         }
-        if let Some(fb) = &self.fb {
+        if let Some(fb) = self.fb.as_mut() {
             fb.blit(0, 0, self.w as usize, self.h as usize, &self.rgba);
         }
     }
@@ -213,9 +213,10 @@ impl Screen {
 
 impl Drop for Screen {
     fn drop(&mut self) {
-        if let Some(fb) = &self.fb {
+        if let Some(fb) = &mut self.fb {
             // Leave the console its own screen back, black.
-            fb.fill(0, 0, fb.w, fb.h, (0, 0, 0));
+            let (w, h) = (fb.w, fb.h);
+            fb.fill(0, 0, w, h, (0, 0, 0));
         }
         if self.backend == Backend::Kitty {
             let mut so = std::io::stdout();
