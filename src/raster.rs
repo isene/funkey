@@ -615,7 +615,8 @@ impl Scene {
 
     /// Paint the frame: the sky through every pixel first, from the
     /// direction it looks along, then the triangles over it. The rows are
-    /// split into bands and the bands over the cores.
+    /// split into bands, and each core takes the next band when it is
+    /// done, so fast cores paint more of them than slow ones.
     pub fn render(&mut self, f: &mut Frame, sky: &(dyn Fn(V3) -> Rgb + Sync)) {
         assert!(f.w == self.w && f.h == self.h, "the frame must be the scene's size");
         // The depth buffer steps out of the scene for the frame, so the
@@ -625,14 +626,17 @@ impl Scene {
         let threads = if self.threads > 0 { self.threads } else { std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1) }.clamp(1, 64);
         let band = ((self.h as usize + threads * 4 - 1) / (threads * 4)).max(1);
         let w = self.w as usize;
-        let bands: Vec<(usize, &mut [Rgb], &mut [f32])> = f.px.chunks_mut(band * w).zip(zbuf.chunks_mut(band * w)).enumerate()
-            .map(|(i, (p, z))| (i * band, p, z)).collect();
-        let mut groups: Vec<Vec<(usize, &mut [Rgb], &mut [f32])>> = (0..threads).map(|_| Vec::new()).collect();
-        for (i, b) in bands.into_iter().enumerate() { groups[i % threads].push(b); }
+        let bands = f.px.chunks_mut(band * w).zip(zbuf.chunks_mut(band * w)).enumerate()
+            .map(|(i, (p, z))| (i * band, p, z));
+        let next = std::sync::Mutex::new(bands);
         let me = &*self;
         std::thread::scope(|s| {
-            for group in groups {
-                s.spawn(move || for (y0, px, zb) in group { me.paint(y0, px, zb, sky); });
+            for _ in 0..threads {
+                s.spawn(|| loop {
+                    let b = next.lock().unwrap().next();
+                    let Some((y0, px, zb)) = b else { break };
+                    me.paint(y0, px, zb, sky);
+                });
             }
         });
         self.zbuf = zbuf;
