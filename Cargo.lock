@@ -126,7 +126,7 @@ dependencies = [
 
 [[package]]
 name = "fe2o3-funkey"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "fe2o3-crust",
  "fe2o3-glow",

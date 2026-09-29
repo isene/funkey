@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>funkey - a game engine for the terminal</title>
-  <meta name="description" content="funkey is a game engine for the terminal, written in Rust: pixels, sound, sprites, tiles, a 3D rasterizer and a Doom renderer. The games on it: Doom, a Crystal Castles tribute, a Jumpman Junior, Space Invaders, a driving game.">
+  <meta name="description" content="funkey is a game engine for the terminal, written in Rust: pixels, sound, sprites, tiles, a 3D rasterizer and a Doom renderer. The games on it: Doom, a Gradius tribute, a Crystal Castles tribute, a Jumpman Junior, Space Invaders, a driving game.">
   <link rel="icon" href="img/funkey.svg" type="image/svg+xml">
   <link rel="stylesheet" href="style.css">
   <meta property="og:title" content="funkey - a game engine for the terminal">
@@ -100,7 +100,7 @@
     <div class="container">
       <h2>The games</h2>
       <p class="section-intro">
-        Eight games come with the engine. Each has its own version, shown on its
+        Nine games come with the engine. Each has its own version, shown on its
         title screen and tagged in the repo; the crate version is the engine's.
         Every one runs with <code>cargo run --release --example &lt;name&gt;</code>,
         and with <code>FUNKEY_PIXELS=kitty</code> in glass or kitty for real pixels.
@@ -110,6 +110,24 @@
       </p>
 
       <div class="grid">
+        <div class="card">
+          <img class="shot" src="img/salvo.png" alt="salvo: the ship flies past a volcano throwing rocks, a row of fans coming at it">
+          <div class="card-head">
+            <div>
+              <h3 class="card-title"><a class="card-link" href="https://github.com/isene/funkey/blob/master/examples/salvo.rs">salvo</a></h3>
+              <div class="card-kind">A tribute to Gradius</div>
+              <div class="card-version">salvo-v1.0</div>
+            </div>
+          </div>
+          <p class="card-desc">
+            Seven stages, a boss at the end of each: a volcano, stone heads,
+            crystals, living cells, the sun, a high-speed maze and the fortress.
+            Capsules light the power-up bar one step at a time: speed, missiles,
+            double, laser, options that follow your path, a shield.
+          </p>
+          <pre><span class="cmd">cargo run --release --example salvo</span></pre>
+        </div>
+
         <div class="card">
           <img class="shot" src="img/gems.png" alt="gems: a bear jumps on the wall of an isometric castle lined with gems">
           <div class="card-head">
@@ -153,7 +171,7 @@
             <div>
               <h3 class="card-title"><a class="card-link" href="https://github.com/isene/funkey/blob/master/examples/soar.rs">soar</a></h3>
               <div class="card-kind">A flight over fractal mountains</div>
-              <div class="card-version">soar-v1.0</div>
+              <div class="card-version">soar-v1.1</div>
             </div>
           </div>
           <p class="card-desc">

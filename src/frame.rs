@@ -49,6 +49,7 @@ impl Frame {
     pub fn rect(&mut self, x: i32, y: i32, w: i32, h: i32, c: Rgb) {
         let (x0, y0) = (x.max(0), y.max(0));
         let (x1, y1) = ((x + w).min(self.w), (y + h).min(self.h));
+        if x0 >= x1 { return; }
         for yy in y0..y1 {
             let row = (yy * self.w) as usize;
             self.px[row + x0 as usize..row + x1 as usize].fill(c);
