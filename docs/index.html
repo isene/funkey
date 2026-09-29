@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>funkey - a game engine for the terminal</title>
-  <meta name="description" content="funkey is a game engine for the terminal, written in Rust: pixels, sound, sprites, tiles, a 3D rasterizer and a Doom renderer. The games on it: Doom, a Jumpman Junior, Space Invaders, a driving game.">
+  <meta name="description" content="funkey is a game engine for the terminal, written in Rust: pixels, sound, sprites, tiles, a 3D rasterizer and a Doom renderer. The games on it: Doom, a Crystal Castles tribute, a Jumpman Junior, Space Invaders, a driving game.">
   <link rel="icon" href="img/funkey.svg" type="image/svg+xml">
   <link rel="stylesheet" href="style.css">
   <meta property="og:title" content="funkey - a game engine for the terminal">
@@ -100,7 +100,7 @@
     <div class="container">
       <h2>The games</h2>
       <p class="section-intro">
-        Seven games come with the engine. Each has its own version, shown on its
+        Eight games come with the engine. Each has its own version, shown on its
         title screen and tagged in the repo; the crate version is the engine's.
         Every one runs with <code>cargo run --release --example &lt;name&gt;</code>,
         and with <code>FUNKEY_PIXELS=kitty</code> in glass or kitty for real pixels.
@@ -110,6 +110,24 @@
       </p>
 
       <div class="grid">
+        <div class="card">
+          <img class="shot" src="img/gems.png" alt="gems: a bear jumps on the wall of an isometric castle lined with gems">
+          <div class="card-head">
+            <div>
+              <h3 class="card-title"><a class="card-link" href="https://github.com/isene/funkey/blob/master/examples/gems.rs">gems</a></h3>
+              <div class="card-kind">A tribute to Crystal Castles</div>
+              <div class="card-version">gems-v1.0</div>
+            </div>
+          </div>
+          <p class="card-desc">
+            Five castles seen from the corner, their walls lined with gems. Take
+            them all before the gem eaters do. Trees walk, a crystal ball rolls,
+            bees swarm, and the witch comes in each castle's third wave. The hat
+            makes you safe for a while, and there is a warp for those who know.
+          </p>
+          <pre><span class="cmd">cargo run --release --example gems</span></pre>
+        </div>
+
         <div class="card">
           <img class="shot" src="img/castle.png" alt="castle: the gatehouse and keep across the moat, banners flying">
           <div class="card-head">

@@ -12,7 +12,7 @@ use crust::{Crust, Cursor, Input, Pane, Popup};
 use std::io::Write;
 use std::path::PathBuf;
 
-const VERSION: &str = "1.1";
+const VERSION: &str = "1.2";
 const PAGE: &str = "https://isene.org/funkey/";
 
 struct Game {
@@ -26,6 +26,13 @@ struct Game {
 }
 
 const GAMES: &[Game] = &[
+    Game {
+        name: "gems",
+        kind: "Arcade",
+        blurb: "A tribute to Crystal Castles",
+        keys: "The arrows walk, two at once for the diagonals; Space jumps, Q quits.\n\nTake every gem before the gem eaters do. Jump the trees, the ball\nand the witch; only the hat stops the bees. There is a warp.",
+        shot: include_bytes!("../../docs/img/gems.png"),
+    },
     Game {
         name: "castle",
         kind: "Walk demo",
