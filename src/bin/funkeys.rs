@@ -12,7 +12,7 @@ use crust::{Crust, Cursor, Input, Pane, Popup};
 use std::io::Write;
 use std::path::PathBuf;
 
-const VERSION: &str = "1.4";
+const VERSION: &str = "1.5";
 const PAGE: &str = "https://isene.org/funkey/";
 
 struct Game {
@@ -26,6 +26,13 @@ struct Game {
 }
 
 const GAMES: &[Game] = &[
+    Game {
+        name: "stack",
+        kind: "Puzzle",
+        blurb: "A tribute to Tetris",
+        keys: "Left and right move, Down drops softly, Space drops hard,\nUp or X turns right, Z turns left, C holds, P pauses, Q quits.\n\nClear four rows at once, spin a T into its slot, chain clears into\ncombos. Every ten rows the level goes up. Left alone, it plays itself.",
+        shot: include_bytes!("../../docs/img/stack.png"),
+    },
     Game {
         name: "eliminator",
         kind: "Dungeon",

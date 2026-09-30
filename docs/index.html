@@ -100,7 +100,7 @@
     <div class="container">
       <h2>The games</h2>
       <p class="section-intro">
-        Ten games come with the engine. Each has its own version, shown on its
+        Eleven games come with the engine. Each has its own version, shown on its
         title screen and tagged in the repo; the crate version is the engine's.
         Every one runs with <code>cargo run --release --example &lt;name&gt;</code>,
         and with <code>FUNKEY_PIXELS=kitty</code> in glass or kitty for real pixels.
@@ -110,6 +110,26 @@
       </p>
 
       <div class="grid">
+        <div class="card">
+          <img class="shot" src="img/stack.png" alt="stack: the game playing itself, a combo of two, the next five pieces on the right">
+          <div class="card-head">
+            <div>
+              <h3 class="card-title"><a class="card-link" href="https://github.com/isene/funkey/blob/master/examples/stack.rs">stack</a></h3>
+              <div class="card-kind">A tribute to Tetris</div>
+              <div class="card-version">stack-v1.0</div>
+            </div>
+          </div>
+          <p class="card-desc">
+            Seven pieces of four blocks, a well ten wide. The pieces turn and
+            kick off the walls as in modern Tetris, and a bag of seven deals
+            them. Hold one, see the next five, drop soft or hard. Four rows at
+            once, a T spun into its slot and clears in a row all score more.
+            Korobeiniki plays, faster when the well fills. Left alone, it
+            plays itself.
+          </p>
+          <pre><span class="cmd">cargo run --release --example stack</span></pre>
+        </div>
+
         <div class="card">
           <img class="shot" src="img/eliminator.png" alt="eliminator: a sellsword fights an Araxi by torchlight, the dice of every roll shown below the map">
           <div class="card-head">
