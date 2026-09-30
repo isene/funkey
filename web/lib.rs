@@ -5,3 +5,8 @@
 #[path = "../examples/eliminator.rs"]
 #[allow(dead_code)]
 mod eliminator;
+
+#[cfg(feature = "stack")]
+#[path = "../examples/stack.rs"]
+#[allow(dead_code)]
+mod stack;

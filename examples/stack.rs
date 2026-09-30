@@ -1061,7 +1061,9 @@ fn fancy_text(f: &mut Frame, cx: i32, y: i32, s: &str, scale: i32, time: f32) {
     }
 }
 
-fn main() {
+/// The game with its sound on and the title tune playing, or playing
+/// itself when `STACK_DEMO` is set.
+fn stack() -> Stack {
     let mut game = Stack::new();
     game.audio = Audio::open();
     game.audio.play_loop(1, &game.s.title, 0.5);
@@ -1069,8 +1071,17 @@ fn main() {
         game.start();
         game.demo = true;
     }
-    run(&mut game, Config { width: W, height: H, fps: 60 });
+    game
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+fn main() {
+    run(&mut stack(), Config { width: W, height: H, fps: 60 });
+}
+
+// In a web page: see web/ in this repo.
+#[cfg(target_arch = "wasm32")]
+funkey::web!(stack(), Config { width: W, height: H, fps: 60 });
 
 #[cfg(test)]
 mod tests {

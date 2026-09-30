@@ -111,7 +111,16 @@
       fk.fk_key(c, down ? 1 : 0);
     }
 
+    // Nothing runs while the game is out of sight, so a page can hold a
+    // game without costing the reader's battery.
+    let seen = true, running = false;
+    const go = () => { if (seen && !running) { running = true; requestAnimationFrame(tick); } };
+    if (window.IntersectionObserver) {
+      new IntersectionObserver(es => { seen = es[es.length - 1].isIntersecting; go(); }).observe(box);
+    }
+
     function tick(ms) {
+      if (!seen) { running = false; return; }
       if (fk.fk_frame(ms)) {
         fit();
         image.data.set(new Uint8ClampedArray(fk.memory.buffer, fk.fk_pixels(), w * h * 4));
@@ -130,7 +139,7 @@
       pump();
       requestAnimationFrame(tick);
     }
-    requestAnimationFrame(tick);
+    go();
     return { key, box };
   }
 
