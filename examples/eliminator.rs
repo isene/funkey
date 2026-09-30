@@ -16,7 +16,7 @@
 //! Arrows or hjkl move, yubn diagonally; walk into a foe to attack. 1-6 or
 //! Tab pick a stance, f fires, p drinks a potion, m bandages, r rests, t
 //! douses or lights the light, g takes what lies here, < or Enter climbs,
-//! s waits, ? shows the rules, Esc quits. `ELIMINATOR_START=<level>` starts
+//! s waits, ? shows the rules, q or Esc quits. `ELIMINATOR_START=<level>` starts
 //! higher up; `ELIMINATOR_SEED=<n>` fixes the maze; `ELIMINATOR_FOE=<n>`
 //! puts that foe, awake, at your right hand.
 
@@ -37,7 +37,7 @@ const MH: i32 = 44;
 const LEVELS: usize = 5;
 const GAME: &str = "eliminator";
 /// The game's own version; the engine has its own.
-const VERSION: &str = "1.2";
+const VERSION: &str = "1.3";
 const TEXT: Rgb = 0xe8e0d0;
 const DIM: Rgb = 0x8a8478;
 const GOLD: Rgb = 0xffd040;
@@ -1155,7 +1155,12 @@ impl Eliminator {
                 self.audio.play(&self.s.coin, 1.0);
                 self.loot.remove(i);
             } else {
-                self.say(&format!("Here: {}. Press g to take it.", item.name()), TEXT);
+                let how = match item {
+                    Item::Weapon(_) | Item::Missile(..) => "g swaps it for yours",
+                    Item::Armour(_) => "g puts it on",
+                    _ => "g takes it",
+                };
+                self.say(&format!("Here: {}. {}.", item.name(), how), TEXT);
                 i += 1;
             }
         }
@@ -1174,24 +1179,31 @@ impl Eliminator {
                     self.say(&format!("The {} is too heavy for your Wield Weapon {}.", WEAPONS[w].name, self.p.sheet.total("Wield Weapon")), RED);
                     return;
                 };
+                let old = WEAPONS[self.p.weapon].name;
                 self.loot[i].item = Item::Weapon(self.p.weapon);
                 self.p.weapon = w;
                 self.p.dropped = false;
                 let (skill, pen, name) = self.weapon_skill();
                 let why = if pen == 0 { String::new() } else { format!(", trained as {} {:+}", name, pen) };
-                self.say(&format!("You take the {}: skill {}{}.", WEAPONS[w].name, skill, why), GOLD);
+                self.say(&format!("You take the {}: skill {}{}. Your {} lies here.", WEAPONS[w].name, skill, why, old), GOLD);
             }
             Item::Missile(m, n) => {
+                let left = self.p.missile.map(|o| format!(" Your {} lies here.", MISSILES[o].name)).unwrap_or_default();
                 self.loot[i].item = match self.p.missile { Some(o) => Item::Missile(o, self.p.ammo), None => Item::Silver(0) };
                 if matches!(self.loot[i].item, Item::Silver(0)) { self.loot.remove(i); }
                 self.p.missile = Some(m);
                 self.p.ammo = n;
-                self.say(&format!("You take the {} ({} {}).", MISSILES[m].name, n, MISSILES[m].ammo), GOLD);
+                self.say(&format!("You take the {} ({} {}).{}", MISSILES[m].name, n, MISSILES[m].ammo, left), GOLD);
             }
             Item::Armour(a) => {
-                self.loot[i].item = Item::Armour(self.p.armour);
+                let (new, old) = (ARMOURS[a], ARMOURS[self.p.armour]);
+                if new.1 <= old.1 {
+                    self.say(&format!("The {} (AP {}) is no better than your {} (AP {}).", new.0, new.1, old.0, old.1), DIM);
+                    return;
+                }
+                self.loot.remove(i);
                 self.p.armour = a;
-                self.say(&format!("You put on the {}: AP {}.", ARMOURS[a].0, ARMOURS[a].1), GOLD);
+                self.say(&format!("You put on the {}, AP {}, and leave your {} behind.", new.0, new.1, old.0), GOLD);
             }
             Item::Ammo(n) => {
                 if self.p.missile.is_some() { self.p.ammo += n; self.loot.remove(i); self.say(&format!("You take {} shots.", n), GOLD); }
@@ -1957,7 +1969,7 @@ impl Eliminator {
         f.text(x + 4, H - 38, &format!("LEVEL {} OF {}  {}", self.level + 1, LEVELS, LEVEL_NAMES[self.level]), GOLD);
         f.text(x + 4, H - 30, &format!("ROUND {}  ({} MIN)", self.turn, self.turn / 10), DIM);
         f.text(x + 4, H - 20, "1-6 STANCE  F FIRE  P POTION  M BANDAGE", DIM);
-        f.text(x + 4, H - 13, "R REST  T LIGHT  G TAKE  < CLIMB  ? RULES", DIM);
+        f.text(x + 4, H - 13, "R REST  T LIGHT  G TAKE  < CLIMB  ? RULES  Q QUIT", DIM);
         f.text(W - 4 - Frame::text_width(VERSION, false, 1), H - 6, VERSION, 0x4a4438);
     }
 
@@ -2036,7 +2048,7 @@ impl Eliminator {
             }
             for (n, (t, col)) in rows.iter().enumerate() { f.text(x + 8, y + 56 + n as i32 * 8, t, *col); }
         }
-        f.text_centered(W / 2, 302, "ARROWS OR 1-3 CHOOSE  ENTER OR SPACE STARTS  ? RULES  ESC QUITS", GOLD, true, 1);
+        f.text_centered(W / 2, 302, "ARROWS OR 1-3 CHOOSE  ENTER OR SPACE STARTS  ? RULES  Q QUITS", GOLD, true, 1);
         let pulse = 0.5 + 0.5 * (self.time * 3.0).sin();
         f.text_centered(W / 2, 313, "NEW TO AMAR? PRESS I: THE THREE TIERS, THE O6 AND A BLOW, IN THREE PAGES", mix(TEXT, GOLD, pulse), false, 1);
         f.text_centered(W / 2, 324, &format!("HIGH SCORE {}", self.high), TEXT, true, 1);
@@ -2093,11 +2105,11 @@ impl Eliminator {
         f.text(W - 44, 18, &format!("{} / {}", self.intro.page + 1, INTRO_PAGES), DIM);
         let c = contenders().remove(self.pick);
         let keys = match self.intro.page {
-            0 => { self.intro_tiers(f, &c); "UP AND DOWN PICK A SKILL    RIGHT OR ENTER: NEXT PAGE    ESC: TITLE".to_string() }
-            1 => { self.intro_o6(f); "SPACE ROLLS ONE    R ROLLS A HUNDRED    LEFT AND RIGHT: PAGES    ESC: TITLE".to_string() }
+            0 => { self.intro_tiers(f, &c); "UP AND DOWN PICK A SKILL    RIGHT OR ENTER: NEXT PAGE    Q: TITLE".to_string() }
+            1 => { self.intro_o6(f); "SPACE ROLLS ONE    R ROLLS A HUNDRED    LEFT AND RIGHT: PAGES    Q: TITLE".to_string() }
             _ => {
                 self.intro_blow_page(f, &c);
-                format!("SPACE STRIKES    ENTER: INTO THE MAZE AS THE {}    LEFT: BACK    ESC: TITLE", c.sheet.name)
+                format!("SPACE STRIKES    ENTER: INTO THE MAZE AS THE {}    LEFT: BACK    Q: TITLE", c.sheet.name)
             }
         };
         f.text_centered(W / 2, H - 22, &keys, GOLD, false, 1);
@@ -2607,9 +2619,11 @@ impl Game for Eliminator {
         for foe in &mut self.foes { foe.flash -= dt; }
         if let Some((_, t)) = self.banner.as_mut() { *t -= dt; if *t <= 0.0 { self.banner = None; } }
         let pressed = |c: char| input.pressed(Key::Char(c));
+        // q does what Esc does: some browsers keep Esc for themselves.
+        let quit = input.pressed(Key::Escape) || pressed('q');
         match self.mode {
             Mode::Title => {
-                if input.pressed(Key::Escape) { return Flow::Quit; }
+                if quit { return Flow::Quit; }
                 if input.pressed(Key::Left) || pressed('h') { self.pick = (self.pick + 2) % 3; }
                 if input.pressed(Key::Right) || pressed('l') { self.pick = (self.pick + 1) % 3; }
                 for (i, c) in ['1', '2', '3'].iter().enumerate() { if pressed(*c) { self.pick = i; self.start(i); return Flow::Continue; } }
@@ -2619,7 +2633,7 @@ impl Game for Eliminator {
             }
             Mode::Intro => {
                 self.intro.age += dt;
-                if input.pressed(Key::Escape) { self.mode = Mode::Title; return Flow::Continue; }
+                if quit { self.mode = Mode::Title; return Flow::Continue; }
                 let last = self.intro.page + 1 == INTRO_PAGES;
                 if last && input.pressed(Key::Enter) { let p = self.pick; self.start(p); return Flow::Continue; }
                 if input.pressed(Key::Left) || pressed('h') { self.intro.page = self.intro.page.saturating_sub(1); }
@@ -2646,14 +2660,14 @@ impl Game for Eliminator {
                 let t = t + dt;
                 self.mode = if matches!(self.mode, Mode::Dead(_)) { Mode::Dead(t) } else { Mode::Won(t) };
                 if t > 1.5 && input.any_pressed() {
-                    if input.pressed(Key::Escape) { return Flow::Quit; }
+                    if quit { return Flow::Quit; }
                     self.mode = Mode::Title;
                     self.build(0);
                     self.audio.play_loop(1, &self.s.title, 0.7);
                 }
             }
             Mode::Play => {
-                if input.pressed(Key::Escape) { return Flow::Quit; }
+                if quit { return Flow::Quit; }
                 let moves: [(Key, char, (i32, i32)); 4] = [(Key::Up, 'k', (0, -1)), (Key::Down, 'j', (0, 1)), (Key::Left, 'h', (-1, 0)), (Key::Right, 'l', (1, 0))];
                 let diag: [(char, (i32, i32)); 4] = [('y', (-1, -1)), ('u', (1, -1)), ('b', (-1, 1)), ('n', (1, 1))];
                 let mut dir = None;
@@ -2728,7 +2742,7 @@ impl Game for Eliminator {
                 f.text_centered(VW * TILE / 2, 100, "YOU FALL IN THE ELIMINATOR", RED, true, 2);
                 f.text_centered(VW * TILE / 2, 128, &format!("LEVEL {}  {} SP  {} GP", self.level + 1, self.p.sp, self.p.gp), TEXT, true, 1);
                 f.text_centered(VW * TILE / 2, 142, &format!("SCORE {}   HIGH {}", self.score(), self.high), GOLD, true, 1);
-                f.text_centered(VW * TILE / 2, 164, "ANY KEY FOR A NEW CONTENDER  ESC QUITS", DIM, true, 1);
+                f.text_centered(VW * TILE / 2, 164, "ANY KEY FOR A NEW CONTENDER  Q QUITS", DIM, true, 1);
             }
             Mode::Won(_) => {
                 f.rect(30, 70, VW * TILE - 60, 130, 0x14100a);
@@ -2736,7 +2750,7 @@ impl Game for Eliminator {
                 f.text_centered(VW * TILE / 2, 112, "The gate grinds open. Daylight.", TEXT, true, 1);
                 f.text_centered(VW * TILE / 2, 124, "By the King's word you rise a noble of Amar.", TEXT, true, 1);
                 f.text_centered(VW * TILE / 2, 146, &format!("SCORE {}   HIGH {}", self.score(), self.high), GOLD, true, 1);
-                f.text_centered(VW * TILE / 2, 176, "ANY KEY FOR A NEW CONTENDER  ESC QUITS", DIM, true, 1);
+                f.text_centered(VW * TILE / 2, 176, "ANY KEY FOR A NEW CONTENDER  Q QUITS", DIM, true, 1);
             }
             _ => {}
         }
@@ -2895,6 +2909,33 @@ mod tests {
         let wins = (0..200).filter(|&s| duel(0, TROLL, s)).count();
         println!("Sellsword against a troll: {} of 200", wins);
         assert!(wins < 120, "{} of 200", wins);
+    }
+
+    #[test]
+    fn better_armour_replaces_yours_and_worse_stays_on_the_floor() {
+        let mut g = Eliminator::new();
+        g.start(0);
+        assert_eq!(g.p.armour, 2, "the sellsword starts in heavy leather, AP 2");
+        let (x, y) = (g.p.x, g.p.y);
+        let here = |g: &Eliminator| g.loot.iter().filter(|l| (l.x, l.y) == (x, y)).count();
+        g.loot.retain(|l| (l.x, l.y) != (x, y));
+        g.loot.push(Loot { x, y, item: Item::Armour(1) });
+        g.take();
+        assert_eq!(g.p.armour, 2, "light leather, AP 1, is no better");
+        assert_eq!(here(&g), 1);
+        g.loot.retain(|l| (l.x, l.y) != (x, y));
+        g.loot.push(Loot { x, y, item: Item::Armour(5) });
+        g.take();
+        assert_eq!(g.p.armour, 5, "chainmail, AP 4, goes on");
+        assert_eq!(here(&g), 0, "and nothing is left on the floor");
+    }
+
+    #[test]
+    fn q_quits_like_escape() {
+        let mut g = Eliminator::new();
+        let mut input = Input::new();
+        input.inject(Key::Char('q'));
+        assert_eq!(g.update(&input, 1.0 / 30.0), Flow::Quit);
     }
 
     #[test]
