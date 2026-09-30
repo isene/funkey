@@ -59,7 +59,7 @@ fn main() {
 
 ## The games
 
-Eight games come with the engine, and Doom below:
+Nine games come with the engine, and Doom below:
 
 - `climb`: a small Jumpman-style platformer, 200 lines. Ladders, coins, blobs.
 - `jumpman`: a Jumpman Junior kind of game. Five levels of girders, ladders and ropes. Bombs to collect, bullets to jump, robots to dodge. A fall from too high is the end of you. Some bombs reveal ladders or take girders away. A title tune, a high score.
@@ -68,6 +68,7 @@ Eight games come with the engine, and Doom below:
 - `castle`: a walk from the hills to a castle and in through its gate, on the textured rasterizer. Stone, slate and wood as textures, the sun and its shadows baked into every corner, banners, torches, pines, mountains and clouds, painted on every core at 960 by 600. Nothing to win.
 - `gems`: a tribute to Crystal Castles. A bear walks five castles seen from the corner and takes every gem before the gem eaters do. Trees walk, a crystal ball rolls, bees swarm, and the witch comes in each castle's third wave. The hat makes you safe for a while. There is a warp.
 - `salvo`: a tribute to Gradius. Seven stages with a boss each: a volcano, stone heads, crystals, living cells, the sun, a maze and the fortress. Capsules light the power-up bar one step at a time, and Z takes what is lit. Speed, missiles, the double shot, the laser, options that follow the ship, a shield. Then it all begins again, harder.
+- `eliminator`: the maze beneath the royal castle of Amar, played by the rules of the [Amar RPG](https://d6gaming.org). Five levels up to the gate, and the Raven Demon guarding it. Every roll is shown: the O6, the totals, the sum. Stances, double attacks at -5, wounds, light, fear, and marks that raise your skills.
 - `drive`: a car on a winding road over the hills, on the 3D rasterizer. Fetch the packages before the clock runs out, then more of them with less time. An arrow points at the nearest. Go fast, leave the road, regret it.
 
 ```bash
@@ -78,6 +79,7 @@ cargo run --release --example soar
 cargo run --release --example castle
 cargo run --release --example gems
 cargo run --release --example salvo
+cargo run --release --example eliminator
 ```
 
 `funkeys` is the picker: the games as cards with screenshots, Enter plays
@@ -134,7 +136,7 @@ writes the last frame. `DOOM_BENCH=1` times the renderer.
 The crate version is the engine's and moves only when the engine
 changes. Each game has its own version, shown on its title screen and
 tagged as `<game>-vX.Y`: `doom-v1.0`, `jumpman-v1.1`, `invaders-v1.0`,
-`drive-v1.0`, `soar-v1.1`, `climb-v1.0`, `castle-v1.0`, `gems-v1.3`, `salvo-v1.0`. The picker is `funkeys-v1.3`.
+`drive-v1.0`, `soar-v1.1`, `climb-v1.0`, `castle-v1.0`, `gems-v1.3`, `salvo-v1.0`, `eliminator-v1.0`. The picker is `funkeys-v1.4`.
 
 ## Using it
 

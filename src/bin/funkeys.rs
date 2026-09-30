@@ -12,7 +12,7 @@ use crust::{Crust, Cursor, Input, Pane, Popup};
 use std::io::Write;
 use std::path::PathBuf;
 
-const VERSION: &str = "1.3";
+const VERSION: &str = "1.4";
 const PAGE: &str = "https://isene.org/funkey/";
 
 struct Game {
@@ -26,6 +26,13 @@ struct Game {
 }
 
 const GAMES: &[Game] = &[
+    Game {
+        name: "eliminator",
+        kind: "Dungeon",
+        blurb: "The Eliminator, by the rules of the Amar RPG",
+        keys: "Arrows or hjkl move, yubn diagonally; walk into a foe to attack.\n1-6 or Tab pick a stance, f fires, p drinks a potion, m bandages,\nr rests, t douses the light, g takes, < climbs, ? the rules, Esc quits.\n\nFive levels up through the maze beneath the royal castle. Every roll\nis shown: the O6, the totals, the sum.",
+        shot: include_bytes!("../../docs/img/eliminator.png"),
+    },
     Game {
         name: "salvo",
         kind: "Shooter",
