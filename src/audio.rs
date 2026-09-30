@@ -1,5 +1,6 @@
 //! Sound. Samples are mixed here and piped to one audio child: pw-play,
-//! paplay or aplay, whichever is installed. A sample comes from a WAV
+//! paplay or aplay, whichever is installed. In a web page the page pulls
+//! the mix instead (see `web`). A sample comes from a WAV
 //! file, a Doom lump, or is made on the spot: a tone, a slide, noise, or
 //! a tune written as notes. A recorder mode plays nothing and writes a
 //! WAV of everything a scripted run asked for, for films and tests.
@@ -216,6 +217,19 @@ enum Mode {
     Off,
     Live { tx: Sender<Cmd>, child: Child },
     Record { t: f32, events: Vec<(f32, Sample, f32)> },
+    /// In a web page: the voices live in `WEB`, where the page mixes them.
+    #[cfg(target_arch = "wasm32")]
+    Web,
+}
+
+/// The voices a web page mixes, one set for the page.
+#[cfg(target_arch = "wasm32")]
+static WEB: std::sync::Mutex<Vec<Voice>> = std::sync::Mutex::new(Vec::new());
+
+/// The next stretch of sound for a web page.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn web_mix(out: &mut [i16]) {
+    if let Ok(mut v) = WEB.lock() { mix(&mut v, out); }
 }
 
 pub struct Audio { mode: Mode }
@@ -224,6 +238,9 @@ impl Audio {
     /// Open the mixer. Silent when no player is found, or when
     /// `FUNKEY_SOUND=0`.
     pub fn open() -> Audio {
+        #[cfg(target_arch = "wasm32")]
+        return Audio { mode: Mode::Web };
+        #[allow(unreachable_code)]
         if std::env::var("FUNKEY_SOUND").map(|v| v == "0").unwrap_or(false) { return Audio::off(); }
         match start_player() { Some((tx, child)) => Audio { mode: Mode::Live { tx, child } }, None => Audio::off() }
     }
@@ -236,21 +253,21 @@ impl Audio {
     pub fn on(&self) -> bool { !matches!(self.mode, Mode::Off) }
 
     /// Play a sample once, on any free channel.
-    pub fn play(&mut self, s: &Sample, vol: f32) { self.send(Cmd::Play { s: s.clone(), vol, looped: false, channel: 0 }, s, vol); }
+    pub fn play(&mut self, s: &Sample, vol: f32) { self.send(Cmd::Play { s: s.clone(), vol, looped: false, channel: 0 }); }
 
     /// Play on a numbered channel (1 to 8), replacing what was there.
-    pub fn play_on(&mut self, channel: u8, s: &Sample, vol: f32) { self.send(Cmd::Play { s: s.clone(), vol, looped: false, channel }, s, vol); }
+    pub fn play_on(&mut self, channel: u8, s: &Sample, vol: f32) { self.send(Cmd::Play { s: s.clone(), vol, looped: false, channel }); }
 
     /// Loop a sample on a numbered channel until `stop`: music, an engine.
-    pub fn play_loop(&mut self, channel: u8, s: &Sample, vol: f32) { self.send(Cmd::Play { s: s.clone(), vol, looped: true, channel }, s, vol); }
+    pub fn play_loop(&mut self, channel: u8, s: &Sample, vol: f32) { self.send(Cmd::Play { s: s.clone(), vol, looped: true, channel }); }
 
-    pub fn stop(&mut self, channel: u8) { self.send(Cmd::Stop(channel), &Sample::from_i16(Vec::new()), 0.0); }
+    pub fn stop(&mut self, channel: u8) { self.send(Cmd::Stop(channel)); }
 
     /// Change a channel's volume while it plays.
-    pub fn volume(&mut self, channel: u8, vol: f32) { if let Mode::Live { tx, .. } = &self.mode { let _ = tx.send(Cmd::Volume(channel, vol)); } }
+    pub fn volume(&mut self, channel: u8, vol: f32) { self.send(Cmd::Volume(channel, vol)); }
 
     /// Change a channel's playback speed: 1.0 as recorded, 2.0 an octave up.
-    pub fn rate(&mut self, channel: u8, rate: f32) { if let Mode::Live { tx, .. } = &self.mode { let _ = tx.send(Cmd::Rate(channel, rate.max(0.05))); } }
+    pub fn rate(&mut self, channel: u8, rate: f32) { self.send(Cmd::Rate(channel, rate.max(0.05))); }
 
     /// Recorder: the clock, in seconds, set by the game every tick.
     pub fn set_time(&mut self, secs: f32) { if let Mode::Record { t, .. } = &mut self.mode { *t = secs; } }
@@ -274,11 +291,13 @@ impl Audio {
         std::fs::write(path, out)
     }
 
-    fn send(&mut self, cmd: Cmd, s: &Sample, vol: f32) {
+    fn send(&mut self, cmd: Cmd) {
         match &mut self.mode {
             Mode::Off => {}
             Mode::Live { tx, .. } => { let _ = tx.send(cmd); }
-            Mode::Record { t, events } => { if let Cmd::Play { .. } = cmd { events.push((*t, s.clone(), vol)); } }
+            Mode::Record { t, events } => { if let Cmd::Play { s, vol, .. } = cmd { events.push((*t, s, vol)); } }
+            #[cfg(target_arch = "wasm32")]
+            Mode::Web => { if let Ok(mut v) = WEB.lock() { apply(&mut v, cmd); } }
         }
     }
 }
@@ -290,6 +309,35 @@ impl Drop for Audio {
 }
 
 struct Voice { data: Arc<Vec<i16>>, pos: f32, step: f32, vol: f32, looped: bool, channel: u8 }
+
+/// One command to the mixer.
+fn apply(voices: &mut Vec<Voice>, cmd: Cmd) {
+    match cmd {
+        Cmd::Play { s, vol, looped, channel } => {
+            if channel != 0 { voices.retain(|v| v.channel != channel); }
+            if voices.len() >= VOICES { voices.remove(0); }
+            voices.push(Voice { data: s.data, pos: 0.0, step: 1.0, vol, looped, channel });
+        }
+        Cmd::Stop(c) => voices.retain(|v| v.channel != c),
+        Cmd::Volume(c, vol) => for v in voices.iter_mut().filter(|v| v.channel == c) { v.vol = vol; },
+        Cmd::Rate(c, r) => for v in voices.iter_mut().filter(|v| v.channel == c) { v.step = r; },
+    }
+}
+
+/// Mix the voices into `out`, then let go of the ones that have ended.
+fn mix(voices: &mut Vec<Voice>, out: &mut [i16]) {
+    for o in out.iter_mut() {
+        let mut acc = 0.0f32;
+        for v in voices.iter_mut() {
+            let i = v.pos as usize;
+            if i < v.data.len() { acc += v.data[i] as f32 * v.vol; }
+            v.pos += v.step;
+            if v.looped && v.pos as usize >= v.data.len() { v.pos = 0.0; }
+        }
+        *o = acc.clamp(-32768.0, 32767.0) as i16;
+    }
+    voices.retain(|v| v.looped || (v.pos as usize) < v.data.len());
+}
 
 fn start_player() -> Option<(Sender<Cmd>, Child)> {
     let rate = RATE.to_string();
@@ -309,18 +357,12 @@ fn start_player() -> Option<(Sender<Cmd>, Child)> {
         let mut voices: Vec<Voice> = Vec::new();
         let start = Instant::now();
         let mut written: usize = 0;
+        let mut pcm = [0i16; CHUNK];
         let mut buf = [0u8; CHUNK * 2];
         loop {
             loop {
                 match rx.try_recv() {
-                    Ok(Cmd::Play { s, vol, looped, channel }) => {
-                        if channel != 0 { voices.retain(|v| v.channel != channel); }
-                        if voices.len() >= VOICES { voices.remove(0); }
-                        voices.push(Voice { data: s.data, pos: 0.0, step: 1.0, vol, looped, channel });
-                    }
-                    Ok(Cmd::Stop(c)) => voices.retain(|v| v.channel != c),
-                    Ok(Cmd::Volume(c, vol)) => for v in voices.iter_mut().filter(|v| v.channel == c) { v.vol = vol; },
-                    Ok(Cmd::Rate(c, r)) => for v in voices.iter_mut().filter(|v| v.channel == c) { v.step = r; },
+                    Ok(cmd) => apply(&mut voices, cmd),
                     Err(TryRecvError::Empty) => break,
                     Err(TryRecvError::Disconnected) => return,
                 }
@@ -328,18 +370,8 @@ fn start_player() -> Option<(Sender<Cmd>, Child)> {
             // Stay a little ahead of the clock, never seconds ahead.
             let due = (start.elapsed().as_secs_f64() * RATE as f64) as usize + LEAD;
             if written + CHUNK > due { std::thread::sleep(Duration::from_millis(4)); continue; }
-            for k in 0..CHUNK {
-                let mut acc = 0.0f32;
-                for v in voices.iter_mut() {
-                    let i = v.pos as usize;
-                    if i < v.data.len() { acc += v.data[i] as f32 * v.vol; }
-                    v.pos += v.step;
-                    if v.looped && v.pos as usize >= v.data.len() { v.pos = 0.0; }
-                }
-                let s = acc.clamp(-32768.0, 32767.0) as i16;
-                buf[k * 2..k * 2 + 2].copy_from_slice(&s.to_le_bytes());
-            }
-            voices.retain(|v| v.looped || (v.pos as usize) < v.data.len());
+            mix(&mut voices, &mut pcm);
+            for (k, s) in pcm.iter().enumerate() { buf[k * 2..k * 2 + 2].copy_from_slice(&s.to_le_bytes()); }
             if stdin.write_all(&buf).is_err() { return; }
             written += CHUNK;
         }

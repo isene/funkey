@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>funkey in a browser</title>
+<style>
+  :root { --bg: #f4f1ea; --ink: #222; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #111; --ink: #ddd; } }
+  :root[data-theme="dark"] { --bg: #111; --ink: #ddd; }
+  body { background: var(--bg); color: var(--ink); font: 16px/1.4 sans-serif; margin: 0 auto; padding: 16px; max-width: 1300px; }
+  canvas { display: block; width: 100%; aspect-ratio: 16 / 9; background: #000; }
+  canvas:focus { outline: 2px solid #ffd040; }
+</style>
+</head>
+<body>
+<!-- A test page: build with the command in Cargo.toml, then serve this
+     folder with the .wasm beside it, e.g. python3 -m http.server. -->
+<canvas id="game" aria-label="A funkey game"></canvas>
+<script src="funkey.js"></script>
+<script>funkey.play(document.getElementById("game"), "target/wasm32-unknown-unknown/release/funkey_web.wasm")</script>
+</body>
+</html>

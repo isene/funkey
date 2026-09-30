@@ -5,6 +5,9 @@
 //! the terminal as half-block cells, two pixels per cell, in full colour.
 //! Later backends show real pixels where the terminal can.
 //!
+//! Built for wasm32 without the `term` feature, the same game runs in a
+//! web page instead: see `src/web.rs` and `web/`.
+//!
 //! ```no_run
 //! use funkey::*;
 //!
@@ -38,11 +41,14 @@ pub mod input;
 pub mod particles;
 pub mod raster;
 pub mod rng;
+#[cfg(feature = "term")]
 pub mod screen;
 pub mod sprite;
 pub mod store;
 pub mod tilemap;
 pub mod wad;
+#[cfg(target_arch = "wasm32")]
+pub mod web;
 
 pub use audio::{Audio, Sample, Tune, Wave};
 pub use frame::{parts, rgb, Frame, Rgb, BLACK, WHITE};
@@ -50,10 +56,12 @@ pub use input::{Input, Key};
 pub use particles::Particles;
 pub use raster::{Cam3, Mat, Mesh, Model, Raster, Scene, Texture, Vert, CUTOUT, M4, V3};
 pub use rng::Rng;
+#[cfg(feature = "term")]
 pub use screen::Screen;
 pub use sprite::Sprite;
 pub use tilemap::{Body, Tilemap};
 
+#[cfg(feature = "term")]
 use std::time::{Duration, Instant};
 
 /// Where `FUNKEY_DEBUG` notes go: ~/.funkey/debug.log.
@@ -95,6 +103,7 @@ pub trait Game {
 /// script are fed for the given ticks (`"right*60,space*5,-*30"`) and
 /// the last frame goes to `FUNKEY_SHOT` as a PPM, or every frame when
 /// `FUNKEY_SHOT_EVERY` is set.
+#[cfg(feature = "term")]
 pub fn run(game: &mut dyn Game, cfg: Config) {
     if let Ok(script) = std::env::var("FUNKEY_SCRIPT") { return run_script(game, cfg, &script); }
     let mut screen = Screen::open();
@@ -130,6 +139,7 @@ pub fn run(game: &mut dyn Game, cfg: Config) {
     }
 }
 
+#[cfg(feature = "term")]
 fn script_key(name: &str) -> Option<Key> {
     Some(match name {
         "up" => Key::Up, "down" => Key::Down, "left" => Key::Left, "right" => Key::Right, "space" => Key::Space,
@@ -140,6 +150,7 @@ fn script_key(name: &str) -> Option<Key> {
     })
 }
 
+#[cfg(feature = "term")]
 fn run_script(game: &mut dyn Game, cfg: Config, script: &str) {
     let mut input = Input::new();
     let mut frame = Frame::new(cfg.width, cfg.height);

@@ -2743,12 +2743,22 @@ impl Game for Eliminator {
     }
 }
 
-fn main() {
+/// The game with its sound on and the title tune playing.
+fn eliminator() -> Eliminator {
     let mut game = Eliminator::new();
     game.audio = Audio::open();
     game.audio.play_loop(1, &game.s.title, 0.7);
-    run(&mut game, Config { width: W, height: H, fps: 30 });
+    game
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+fn main() {
+    run(&mut eliminator(), Config { width: W, height: H, fps: 30 });
+}
+
+// In a web page: see web/ in this repo.
+#[cfg(target_arch = "wasm32")]
+funkey::web!(eliminator(), Config { width: W, height: H, fps: 30 });
 
 #[cfg(test)]
 mod tests {

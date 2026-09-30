@@ -1,16 +1,35 @@
 //! Keys, with a held state a terminal does not give on its own. There is
 //! no key-up: a key counts as held from its press until its repeats stop
 //! coming. The first repeat takes the terminal's repeat delay to arrive,
-//! so a fresh press is held a little longer than a repeating one.
+//! so a fresh press is held a little longer than a repeating one. A web
+//! page reports releases, so there none of the timing is needed.
 
+// Without the terminal the timers go unused.
+#![cfg_attr(not(feature = "term"), allow(dead_code))]
+
+#[cfg(feature = "term")]
 use crust::input::KeyState;
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
 
-/// After a first press, how long the key stays held without a repeat.
-const FIRST_HOLD: Duration = Duration::from_millis(650);
+/// After a first press, how long the key stays held without a repeat, in
+/// seconds.
+const FIRST_HOLD: f64 = 0.65;
 /// Between repeats, how long the key stays held without the next one.
-const REPEAT_HOLD: Duration = Duration::from_millis(120);
+const REPEAT_HOLD: f64 = 0.12;
+
+/// Seconds on a clock that only runs forward. std has no clock in a web
+/// page, so there the page sets it every frame (see `web`).
+pub(crate) fn clock() -> f64 {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+        START.get_or_init(std::time::Instant::now).elapsed().as_secs_f64()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        crate::web::now()
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Key {
@@ -19,7 +38,7 @@ pub enum Key {
 }
 
 struct Held {
-    last: Instant,
+    last: f64,
     repeats: u32,
 }
 
@@ -37,10 +56,11 @@ impl Input {
     pub fn new() -> Input { Input::default() }
 
     /// Drain everything the terminal has queued. Call once per tick.
+    #[cfg(feature = "term")]
     pub fn poll(&mut self) {
         self.pressed.clear();
         self.resized = false;
-        let now = Instant::now();
+        let now = clock();
         while crust::input::Input::peek_pending() {
             let Some((name, state)) = crust::input::Input::event_ms(0) else { break };
             if name == "RESIZE" { self.resized = true; continue; }
@@ -60,19 +80,19 @@ impl Input {
         self.expire(now);
     }
 
-    fn press(&mut self, key: Key, now: Instant) {
+    fn press(&mut self, key: Key, now: f64) {
         match self.held.get_mut(&key) {
             // Without release reports a press within the window is a repeat.
-            Some(h) if (self.exact && releases(key)) || now.duration_since(h.last) < hold_for(h.repeats) => { h.last = now; h.repeats += 1; }
+            Some(h) if (self.exact && releases(key)) || now - h.last < hold_for(h.repeats) => { h.last = now; h.repeats += 1; }
             _ => { self.held.insert(key, Held { last: now, repeats: 0 }); self.pressed.push(key); }
         }
     }
 
     /// Let go of the keys whose repeats have stopped, where no release
     /// report will come.
-    fn expire(&mut self, now: Instant) {
+    fn expire(&mut self, now: f64) {
         let exact = self.exact;
-        self.held.retain(|&k, h| (exact && releases(k)) || now.duration_since(h.last) < hold_for(h.repeats));
+        self.held.retain(|&k, h| (exact && releases(k)) || now - h.last < hold_for(h.repeats));
     }
 
     /// True when the terminal reports key releases, so `held` is exact.
@@ -84,10 +104,19 @@ impl Input {
     /// Feed a key from outside the terminal: held this tick, and pressed
     /// unless it was already down. For scripted runs and tests.
     pub fn inject(&mut self, key: Key) {
-        let now = Instant::now();
+        let now = clock();
         if !self.held.contains_key(&key) { self.pressed.push(key); }
         self.held.insert(key, Held { last: now, repeats: 1 });
         self.exact = true;
+    }
+
+    /// A key went down or up in a web page, which reports both, Enter's
+    /// too. Repeats are the page's to drop.
+    pub fn key(&mut self, key: Key, down: bool) {
+        self.exact = true;
+        if !down { self.held.remove(&key); return; }
+        if !self.held.contains_key(&key) { self.pressed.push(key); }
+        self.held.insert(key, Held { last: clock(), repeats: 0 });
     }
 
     /// Forget this tick's presses, keeping what is held: the start of a
@@ -142,7 +171,7 @@ impl Input {
 /// usable after a crash). Those three are held on a timer even then.
 fn releases(key: Key) -> bool { !matches!(key, Key::Enter | Key::Tab | Key::Backspace) }
 
-fn hold_for(repeats: u32) -> Duration {
+fn hold_for(repeats: u32) -> f64 {
     if repeats == 0 { FIRST_HOLD } else { REPEAT_HOLD }
 }
 
@@ -179,7 +208,7 @@ mod tests {
     #[test]
     fn with_release_reports_a_key_is_held_until_released() {
         let mut i = Input::new();
-        i.held.insert(Key::Up, Held { last: Instant::now() - Duration::from_secs(5), repeats: 0 });
+        i.held.insert(Key::Up, Held { last: clock() - 5.0, repeats: 0 });
         i.exact = true;
         assert!(i.held(Key::Up), "no timeout once releases are reported");
         assert!(i.motion(Key::Up));
@@ -192,31 +221,31 @@ mod tests {
     fn enter_is_pressed_again_though_its_release_never_comes() {
         let mut i = Input::new();
         i.exact = true;
-        let t0 = Instant::now();
+        let t0 = clock();
         i.press(Key::Enter, t0);
         assert!(i.pressed(Key::Enter));
-        i.expire(t0 + Duration::from_millis(700));
+        i.expire(t0 + 0.7);
         assert!(!i.held(Key::Enter), "let go on the timer");
         i.pressed.clear();
-        i.press(Key::Enter, t0 + Duration::from_millis(900));
+        i.press(Key::Enter, t0 + 0.9);
         assert!(i.pressed(Key::Enter), "a second Enter is a new press");
         // A key with release reports stays held, with no timer.
         i.press(Key::Up, t0);
-        i.expire(t0 + Duration::from_secs(5));
+        i.expire(t0 + 5.0);
         assert!(i.held(Key::Up));
     }
 
     #[test]
     fn a_press_is_held_until_its_repeats_stop() {
         let mut i = Input::new();
-        let t0 = Instant::now();
+        let t0 = clock();
         i.held.insert(Key::Right, Held { last: t0, repeats: 0 });
         assert!(i.held(Key::Right));
-        i.held.insert(Key::Right, Held { last: t0 - Duration::from_millis(700), repeats: 0 });
-        i.held.retain(|_, h| Instant::now().duration_since(h.last) < hold_for(h.repeats));
+        i.held.insert(Key::Right, Held { last: t0 - 0.7, repeats: 0 });
+        i.held.retain(|_, h| clock() - h.last < hold_for(h.repeats));
         assert!(!i.held(Key::Right), "no repeat within the first delay: released");
-        i.held.insert(Key::Right, Held { last: t0 - Duration::from_millis(200), repeats: 3 });
-        i.held.retain(|_, h| Instant::now().duration_since(h.last) < hold_for(h.repeats));
+        i.held.insert(Key::Right, Held { last: t0 - 0.2, repeats: 3 });
+        i.held.retain(|_, h| clock() - h.last < hold_for(h.repeats));
         assert!(!i.held(Key::Right), "repeats stopped: released");
     }
 }

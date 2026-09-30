@@ -6,8 +6,12 @@ pub struct Rng(u64);
 impl Rng {
     pub fn new(seed: u64) -> Rng { Rng(seed ^ 0x9e37_79b9_7f4a_7c15 | 1) }
 
-    /// Seeded from the clock: a different game every time.
+    /// Seeded from the clock: a different game every time. A web page
+    /// has no clock for std, so there the seed comes from the page.
     pub fn from_time() -> Rng {
+        #[cfg(target_arch = "wasm32")]
+        let t = crate::web::seed();
+        #[cfg(not(target_arch = "wasm32"))]
         let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1);
         Rng::new(t)
     }
