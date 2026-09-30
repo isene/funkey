@@ -37,7 +37,7 @@ const MH: i32 = 44;
 const LEVELS: usize = 5;
 const GAME: &str = "eliminator";
 /// The game's own version; the engine has its own.
-const VERSION: &str = "1.0";
+const VERSION: &str = "1.1";
 const TEXT: Rgb = 0xe8e0d0;
 const DIM: Rgb = 0x8a8478;
 const GOLD: Rgb = 0xffd040;
@@ -1880,7 +1880,8 @@ impl Eliminator {
         let x0 = 4;
         f.text(x0, BAND + 4, if self.tray_head.is_empty() { "THE DICE" } else { &self.tray_head }, GOLD);
         let mut y = BAND + 13;
-        for l in self.tray.iter().take(7) {
+        // A long round shows its last seven rolls.
+        for l in self.tray.iter().skip(self.tray.len().saturating_sub(7)) {
             f.text(x0, y + 2, &l.who, l.color);
             let mut dx = x0 + 52;
             for (n, &d) in l.dice.iter().enumerate().take(6) {
@@ -1894,15 +1895,15 @@ impl Eliminator {
         // The log.
         let lx = 262;
         f.vline(lx - 4, BAND + 2, H - BAND - 4, 0x2a2418);
-        let n = self.log.len();
-        let show = ((H - BAND - 6) / 8) as usize;
+        // The newest lines, after wrapping, so a long message never hides them.
+        let lines: Vec<(String, Rgb)> = self.log.iter()
+            .flat_map(|(s, c)| wrap(s, 38).into_iter().map(move |l| (l, *c)))
+            .collect();
+        let rows = ((H - 8 - BAND - 4) / 7 + 1) as usize;
         let mut y = BAND + 4;
-        for (s, c) in self.log.iter().skip(n.saturating_sub(show)) {
-            for chunk in wrap(s, 38) {
-                if y > H - 8 { break; }
-                f.text(lx, y, &chunk, *c);
-                y += 7;
-            }
+        for (l, c) in lines.iter().skip(lines.len().saturating_sub(rows)) {
+            f.text(lx, y, l, *c);
+            y += 7;
         }
     }
 
