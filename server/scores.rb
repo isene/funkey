@@ -21,6 +21,10 @@ GAMES = %w[stack].freeze
 KEEP = 10
 WAIT = 15
 
+# Files the web server makes stay writable for the www-data group, so the
+# lists can be edited by hand.
+File.umask(0o002)
+
 def reply(status, body)
   print "Status: #{status}\r\n"
   print "Content-Type: text/plain; charset=utf-8\r\n"
