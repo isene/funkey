@@ -37,7 +37,7 @@ const MH: i32 = 44;
 const LEVELS: usize = 5;
 const GAME: &str = "eliminator";
 /// The game's own version; the engine has its own.
-const VERSION: &str = "1.1";
+const VERSION: &str = "1.2";
 const TEXT: Rgb = 0xe8e0d0;
 const DIM: Rgb = 0x8a8478;
 const GOLD: Rgb = 0xffd040;
@@ -440,10 +440,42 @@ struct Trap { x: i32, y: i32, found: bool }
 // ------------------------------------------------------------------ the game
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-enum Mode { Title, Play, Help, Dead(f32), Won(f32) }
+enum Mode { Title, Intro, Play, Help, Dead(f32), Won(f32) }
 
 /// One line of the dice tray: who rolled, the dice, and the sum.
 struct Line { who: String, dice: Vec<u8>, sum: String, color: Rgb }
+
+/// The walk-through behind `i` on the title: the three tiers, the O6, and
+/// one blow against an Araxi.
+const INTRO_PAGES: usize = 3;
+
+#[derive(Default)]
+struct Intro {
+    page: usize,
+    /// The skill lit on the first page, in the order the tree draws them.
+    skill: usize,
+    /// The last O6 and the seconds since, so its dice land one by one.
+    roll: Option<Roll>,
+    age: f32,
+    /// Every O6 rolled on the second page, by total from -3 to 12.
+    tally: [u32; 16],
+    sum: i64,
+    crits: u32,
+    fumbles: u32,
+    /// The last blow on the third page, and the Araxi's BP.
+    blow: Option<Blow>,
+    araxi: i32,
+}
+
+struct Blow { a: Roll, at: i32, d: Roll, dt: i32, hit: bool, dam: Option<(Roll, i32)> }
+
+/// A sheet's skills in the order the tree draws them: by attribute, so no
+/// two lines cross.
+fn tree_skills(sheet: &Sheet) -> Vec<&'static str> {
+    let mut v: Vec<&'static str> = sheet.skills.iter().map(|k| k.0).collect();
+    v.sort_by_key(|s| attr_of(s));
+    v
+}
 
 struct Player {
     sheet: Sheet,
@@ -525,6 +557,7 @@ struct Eliminator {
     s: Sounds,
     art: Vec<Sprite>,
     help_page: usize,
+    intro: Intro,
 }
 
 fn idx(x: i32, y: i32) -> usize { (y * MW + x) as usize }
@@ -545,7 +578,7 @@ impl Eliminator {
             vis: vec![false; (MW * MH) as usize], dist: vec![i32::MAX; (MW * MH) as usize], tex: Vec::new(),
             foes: Vec::new(), loot: Vec::new(), traps: Vec::new(), p, turn: 0, log: VecDeque::new(), tray_head: String::new(),
             tray: Vec::new(), floats: Vec::new(), banner: None, rng: Rng::from_time(), particles: Particles::new(), time: 0.0,
-            hold: 0.0, high: funkey::store::high_score(GAME), audio: Audio::off(), s: sounds(), art: art(), help_page: 0,
+            hold: 0.0, high: funkey::store::high_score(GAME), audio: Audio::off(), s: sounds(), art: art(), help_page: 0, intro: Intro::default(),
         };
         g.particles.gravity = 60.0;
         g.build(0);
@@ -587,6 +620,60 @@ impl Eliminator {
         self.say("You are lowered into the dark. Climb out.", GOLD);
         self.say("Walk into a foe to attack. ? explains the rules.", DIM);
         self.audio.play_loop(1, &self.s.music, 0.5);
+    }
+
+    // -------------------------------------------------------------- the intro
+
+    /// Open the walk-through for the picked contender, its weapon skill lit.
+    fn open_intro(&mut self) {
+        let c = contenders().remove(self.pick);
+        let w = WEAPONS[c.weapon].name;
+        let skill = tree_skills(&c.sheet).iter().position(|s| *s == w).unwrap_or(0);
+        self.intro = Intro { skill, araxi: KINDS[ARAXI].bp, ..Intro::default() };
+        self.mode = Mode::Intro;
+    }
+
+    /// Roll `n` O6 on the second page and count them.
+    fn intro_roll(&mut self, n: usize) {
+        for _ in 0..n {
+            let r = o6(&mut self.rng);
+            let it = &mut self.intro;
+            it.tally[(r.total.clamp(-3, 12) + 3) as usize] += 1;
+            it.sum += r.total as i64;
+            if r.crit { it.crits += 1; }
+            if r.fumble { it.fumbles += 1; }
+            it.roll = Some(r);
+        }
+        // A hundred at once land at once.
+        self.intro.age = if n > 1 { 9.0 } else { 0.0 };
+        self.audio.play(&self.s.dice, 0.5);
+    }
+
+    /// One blow on the third page, by the same sums as the maze, without
+    /// stance, light or wounds. A fallen Araxi gets up for another go.
+    fn intro_blow(&mut self) {
+        if self.intro.araxi <= 0 {
+            self.intro.araxi = KINDS[ARAXI].bp;
+            self.intro.blow = None;
+            return;
+        }
+        let c = contenders().remove(self.pick);
+        let w = &WEAPONS[c.weapon];
+        let k = &KINDS[ARAXI];
+        let (a, d) = (o6(&mut self.rng), o6(&mut self.rng));
+        let (at, dt) = (a.total + w.off + c.sheet.total(w.name), d.total + k.def);
+        let hit = lands(&a, at, &d, dt);
+        let dam = if hit {
+            let r = o6(&mut self.rng);
+            let n = (r.total + w.dam + c.sheet.db() - k.ap).max(0);
+            self.intro.araxi -= n;
+            Some((r, n))
+        } else {
+            None
+        };
+        self.intro.blow = Some(Blow { a, at, d, dt, hit, dam });
+        self.intro.age = 0.0;
+        self.audio.play(&self.s.dice, 0.5);
     }
 
     // -------------------------------------------------------------- building a level
@@ -1885,8 +1972,7 @@ impl Eliminator {
             f.text(x0, y + 2, &l.who, l.color);
             let mut dx = x0 + 52;
             for (n, &d) in l.dice.iter().enumerate().take(6) {
-                let hot = l.dice.len() > 1 && ((l.dice[0] == 6 && n > 0 && l.dice[n - 1] == 6 && d == 6) || (l.dice[0] == 1 && n > 0 && l.dice[n - 1] == 1 && d == 1));
-                draw_die(f, dx, y, d, hot);
+                draw_die(f, dx, y, d, hot_die(&l.dice, n), 1);
                 dx += 11;
             }
             f.text(dx + 2, y + 2, &l.sum, l.color);
@@ -1950,9 +2036,11 @@ impl Eliminator {
             }
             for (n, (t, col)) in rows.iter().enumerate() { f.text(x + 8, y + 56 + n as i32 * 8, t, *col); }
         }
-        f.text_centered(W / 2, 306, "ARROWS OR 1-3 CHOOSE  ENTER OR SPACE STARTS  ? RULES  ESC QUITS", GOLD, true, 1);
-        f.text_centered(W / 2, 320, &format!("HIGH SCORE {}", self.high), TEXT, true, 1);
-        f.text_centered(W / 2, 334, "ALL NEW ART AND MUSIC. AMAR RPG BY GEIR ISENE, D6GAMING.ORG", DIM, false, 1);
+        f.text_centered(W / 2, 302, "ARROWS OR 1-3 CHOOSE  ENTER OR SPACE STARTS  ? RULES  ESC QUITS", GOLD, true, 1);
+        let pulse = 0.5 + 0.5 * (self.time * 3.0).sin();
+        f.text_centered(W / 2, 313, "NEW TO AMAR? PRESS I: THE THREE TIERS, THE O6 AND A BLOW, IN THREE PAGES", mix(TEXT, GOLD, pulse), false, 1);
+        f.text_centered(W / 2, 324, &format!("HIGH SCORE {}", self.high), TEXT, true, 1);
+        f.text_centered(W / 2, 340, "ALL NEW ART AND MUSIC. AMAR RPG BY GEIR ISENE, D6GAMING.ORG", DIM, false, 1);
         f.text(W - 4 - Frame::text_width(VERSION, false, 1), H - 7, VERSION, 0x4a4438);
     }
 
@@ -1993,6 +2081,212 @@ impl Eliminator {
             y += 13;
         }
         f.text_centered(W / 2, H - 24, "ANY KEY GOES BACK", DIM, true, 1);
+    }
+
+    fn draw_intro(&self, f: &mut Frame) {
+        f.clear(0x080604);
+        f.rect(12, 8, W - 24, H - 16, 0x0e0b08);
+        f.rect(12, 8, W - 24, 1, GOLD);
+        f.rect(12, H - 9, W - 24, 1, GOLD);
+        let heads = ["THREE TIERS", "THE O6", "A BLOW"];
+        f.text_centered(W / 2, 14, heads[self.intro.page], GOLD, true, 2);
+        f.text(W - 44, 18, &format!("{} / {}", self.intro.page + 1, INTRO_PAGES), DIM);
+        let c = contenders().remove(self.pick);
+        let keys = match self.intro.page {
+            0 => { self.intro_tiers(f, &c); "UP AND DOWN PICK A SKILL    RIGHT OR ENTER: NEXT PAGE    ESC: TITLE".to_string() }
+            1 => { self.intro_o6(f); "SPACE ROLLS ONE    R ROLLS A HUNDRED    LEFT AND RIGHT: PAGES    ESC: TITLE".to_string() }
+            _ => {
+                self.intro_blow_page(f, &c);
+                format!("SPACE STRIKES    ENTER: INTO THE MAZE AS THE {}    LEFT: BACK    ESC: TITLE", c.sheet.name)
+            }
+        };
+        f.text_centered(W / 2, H - 22, &keys, GOLD, false, 1);
+    }
+
+    /// Page one: the sheet as a tree, characteristic to attribute to skill,
+    /// with one skill's three tiers lit and summed.
+    fn intro_tiers(&self, f: &mut Frame, c: &Contender) {
+        let s = &c.sheet;
+        let skills = tree_skills(s);
+        let lit = skills[self.intro.skill.min(skills.len() - 1)];
+        let (la, faint, line) = (attr_of(lit), 0x5a5448, 0x3a3020);
+        let lc = ATTRS[la].1;
+        f.text_centered(W / 2, 34, &format!("The {}'s sheet. Every skill sits under an attribute, every attribute under a characteristic.", s.name), DIM, false, 1);
+        let (cx, ax, kx, bw) = (40, 214, 400, 140);
+        let row = |i: usize| 58 + i as i32 * 14;
+        let char_y = |c: usize| {
+            let rows: Vec<usize> = (0..ATTRS.len()).filter(|&a| ATTRS[a].1 == c).collect();
+            match (rows.first(), rows.last()) {
+                (Some(&a), Some(&b)) => (row(a) + row(b)) / 2,
+                _ => row(ATTRS.len()) + 4,
+            }
+        };
+        f.text(cx, 48, "CHARACTERISTIC", DIM);
+        f.text(ax, 48, "ATTRIBUTE", DIM);
+        f.text(kx, 48, "SKILL", DIM);
+        // The lines first, the lit path last so nothing covers it.
+        for on in [false, true] {
+            let col = if on { GOLD } else { line };
+            for a in 0..ATTRS.len() {
+                if (a == la) == on { f.line(cx + bw, char_y(ATTRS[a].1) + 5, ax, row(a) + 5, col); }
+            }
+            for (i, &k) in skills.iter().enumerate() {
+                if (k == lit) == on { f.line(ax + bw, row(attr_of(k)) + 5, kx, row(i) + 5, col); }
+            }
+        }
+        let boxed = |f: &mut Frame, x: i32, y: i32, name: &str, v: i32, on: bool, dim: bool| {
+            f.rect(x, y, bw, 11, if on { 0x3a2c14 } else { 0x16120c });
+            if on { f.rect(x, y, 2, 11, GOLD); }
+            let col = if on { GOLD } else if dim { faint } else { TEXT };
+            f.text(x + 5, y + 3, name, col);
+            let v = v.to_string();
+            f.text(x + bw - 5 - Frame::text_width(&v, false, 1), y + 3, &v, col);
+        };
+        for (i, name) in CHARS.iter().enumerate() { boxed(f, cx, char_y(i), name, s.chars[i], i == lc, s.chars[i] == 0); }
+        f.text(cx + bw + 6, char_y(2) + 3, "MAGIC. NOT USED IN THE MAZE.", faint);
+        for (a, (name, _)) in ATTRS.iter().enumerate() {
+            let used = skills.iter().any(|k| attr_of(k) == a);
+            boxed(f, ax, row(a), name, s.attrs[a], a == la, !used && s.attrs[a] == 0);
+        }
+        for (i, &k) in skills.iter().enumerate() { boxed(f, kx, row(i), k, s.rank(k), k == lit, false); }
+        let (ch, at, rk) = s.parts(lit);
+        f.text_centered(W / 2, 204, &format!("{} = {} {} + {} {} + {} {} = {}", lit, CHARS[lc], ch, ATTRS[la].0, at, lit, rk, ch + at + rk), GOLD, true, 1);
+        let lines = [
+            "A roll adds all three tiers. That sum is the skill's total, the number you roll with.",
+            "Melee Combat helps every weapon you swing, and BODY helps everything your body does.",
+            "An untrained weapon uses your best one: -1 if it is the same kind, -3 the same group, -5 any other.",
+            "Use a skill well and it earns marks. Enough marks, and a d6 of 2 or more raises it by one.",
+            "Each rise gives the attribute above a mark. Each rise of an attribute gives its characteristic one.",
+            "So you grow from the bottom up: a skill first, then a talent, then the whole body or mind.",
+        ];
+        for (n, l) in lines.iter().enumerate() { f.text_centered(W / 2, 222 + n as i32 * 11, l, TEXT, false, 1); }
+    }
+
+    /// Page two: the O6, rolled by hand, with a count of every total.
+    fn intro_o6(&self, f: &mut Frame) {
+        let it = &self.intro;
+        let rules = [
+            "Every roll in Amar is the O6: a d6 that can keep on rolling.",
+            "A 2, 3, 4 or 5 is what you get.",
+            "A 6 rolls on: +1 for every 4, 5 or 6, until a 1, 2 or 3 stops it.",
+            "A 1 rolls on: -1 for every 1, 2 or 3, until a 4, 5 or 6 stops it.",
+            "Two 6s in a row: CRITICAL, a success whatever the totals. Two 1s in a row: FUMBLE, a failure.",
+            "Most rolls land on 2 to 5, so every +1 on your sheet counts. But anything can happen.",
+        ];
+        for (n, l) in rules.iter().enumerate() { f.text(40, 36 + n as i32 * 9, l, if n == 0 { GOLD } else { TEXT }); }
+        let y = 96;
+        match &it.roll {
+            None => {
+                let pulse = 0.5 + 0.5 * (self.time * 4.0).sin();
+                f.text(40, y + 10, "PRESS SPACE TO ROLL", mix(DIM, GOLD, pulse));
+            }
+            Some(r) => {
+                let mut x = 40;
+                let shown = r.dice.len().min(12);
+                for (n, &d) in r.dice.iter().enumerate().take(shown) {
+                    if it.age < n as f32 * 0.18 { break; }
+                    draw_die(f, x, y, d, hot_die(&r.dice, n), 3);
+                    let tag = match (n, r.dice[0], d) {
+                        (0, 2..=5, _) => "DONE",
+                        (0, _, _) => "ROLL ON",
+                        (_, 6, 4..=6) => "+1",
+                        (_, 1, 1..=3) => "-1",
+                        _ => "STOP",
+                    };
+                    f.text_centered(x + 13, y + 31, tag, if tag == "DONE" || tag == "STOP" { DIM } else { TEXT }, false, 1);
+                    x += 34;
+                }
+                if it.age >= (shown - 1) as f32 * 0.18 + 0.1 {
+                    f.text_scaled(x + 6, y + 6, &format!("= {}", r.total), GOLD, true, 2);
+                    let (v, col) = if r.crit { ("CRITICAL: TWO 6S IN A ROW", GOLD) } else if r.fumble { ("FUMBLE: TWO 1S IN A ROW", RED) } else { ("", TEXT) };
+                    f.text(x + 6, y + 24, v, col);
+                }
+            }
+        }
+        // The count, one bar per total.
+        let rolls: u32 = it.tally.iter().sum();
+        f.text(40, 150, "EVERY ROLL YOU MAKE, COUNTED BY ITS TOTAL", DIM);
+        let top = it.tally.iter().copied().max().unwrap_or(0).max(1);
+        let (x0, base) = (48, 286);
+        for (i, &n) in it.tally.iter().enumerate() {
+            let t = i as i32 - 3;
+            let x = x0 + i as i32 * 34;
+            let h = (n as i64 * 104 / top as i64) as i32;
+            let col = if t >= 6 { GOLD } else if t <= 1 { RED } else { 0x8a7a5a };
+            f.rect(x, base - h, 26, h, col);
+            if n > 0 { f.text_centered(x + 13, base - h - 8, &n.to_string(), DIM, false, 1); }
+            let label = if i == 15 { "12+".to_string() } else { t.to_string() };
+            f.text_centered(x + 13, base + 4, &label, TEXT, false, 1);
+        }
+        if rolls > 0 {
+            let s = format!("ROLLS {}    AVERAGE {:.2}    CRITICALS {}    FUMBLES {}    EACH SHOULD COME ABOUT 1 IN 36",
+                rolls, it.sum as f64 / rolls as f64, it.crits, it.fumbles);
+            f.text_centered(W / 2, 302, &s, TEXT, false, 1);
+        }
+    }
+
+    /// Page three: one blow of the picked contender against an Araxi, the
+    /// sums spelled out.
+    fn intro_blow_page(&self, f: &mut Frame, c: &Contender) {
+        let it = &self.intro;
+        let s = &c.sheet;
+        let w = &WEAPONS[c.weapon];
+        let k = &KINDS[ARAXI];
+        let skill = s.total(w.name);
+        let off = w.off + skill;
+        // The two of them, face to face.
+        let (me, foe) = (&self.art[c.art], &self.art[k.art]);
+        let (mx, fx, sy) = (40, W - 40 - foe.w * 6, 44);
+        f.blit_scaled(me, mx, sy, 6, false);
+        f.blit_scaled(foe, fx, sy, 6, true);
+        let under = sy + me.h * 6 + 6;
+        f.text_centered(mx + me.w * 3, under, s.name, GOLD, false, 1);
+        f.text_centered(mx + me.w * 3, under + 9, &format!("BP {}", s.bp_max()), TEXT, false, 1);
+        f.text_centered(fx + foe.w * 3, under, "ARAXI", RED, false, 1);
+        let left = it.araxi.max(0);
+        f.rect(fx, under + 9, foe.w * 6, 4, 0x3a1010);
+        f.rect(fx, under + 9, foe.w * 6 * left / k.bp, 4, RED);
+        f.text_centered(fx + foe.w * 3, under + 16, &format!("BP {} OF {}", left, k.bp), TEXT, false, 1);
+        // The sums.
+        let cx = W / 2;
+        f.text_centered(cx, 40, &format!("Your Off = {} Off {} + {} total {} = {}", w.name, w.off, w.name, skill, off), TEXT, false, 1);
+        f.text_centered(cx, 50, &format!("The Araxi's Def = {}. Its armour stops {} of any blow: AP {}.", k.def, k.ap, k.ap), TEXT, false, 1);
+        f.text_centered(cx, 60, &format!("Your damage = O6 + {} Dam {} + DB {} - its AP {}", w.name, w.dam, s.db(), k.ap), TEXT, false, 1);
+        f.text_centered(cx, 70, "Your O6 + Off against its O6 + Def. The higher total hits.", GOLD, false, 1);
+        match &it.blow {
+            None => {
+                let pulse = 0.5 + 0.5 * (self.time * 4.0).sin();
+                f.text_centered(cx, 110, "PRESS SPACE TO STRIKE", mix(DIM, GOLD, pulse), true, 1);
+            }
+            Some(b) => {
+                let x = 150;
+                let (n, a_down) = dice_row(f, x, 84, "YOU", &b.a, &format!("{} + Off {} = {}", b.a.total, off, b.at), TEXT, 0, it.age);
+                let (n, d_down) = dice_row(f, x, 106, "ARAXI", &b.d, &format!("{} + Def {} = {}", b.d.total, k.def, b.dt), DIM, n, it.age);
+                if a_down && d_down {
+                    let (v, col) = if b.a.fumble { ("FUMBLE: YOUR BLOW GOES WILD".to_string(), RED) }
+                        else if b.a.crit && b.hit { ("CRITICAL: IT LANDS WHATEVER THE TOTALS".to_string(), GOLD) }
+                        else if b.d.crit && !b.hit { ("ITS CRITICAL: IT PARRIES WHATEVER THE TOTALS".to_string(), DIM) }
+                        else if b.d.fumble && b.hit { ("ITS FUMBLE: YOUR BLOW GETS THROUGH".to_string(), GOLD) }
+                        else if b.hit { (format!("HIT: {} BEATS {}", b.at, b.dt), GOLD) }
+                        else { (format!("MISS: {} DOES NOT BEAT {}", b.at, b.dt), DIM) };
+                    f.text_centered(cx, 132, &v, col, true, 1);
+                }
+                if let Some((r, dmg)) = &b.dam {
+                    let sum = format!("{} + Dam {} + DB {} - AP {} = {}", r.total, w.dam, s.db(), k.ap, dmg);
+                    let (_, down) = dice_row(f, x, 146, "DAMAGE", r, &sum, GOLD, n + 3, it.age);
+                    if down && it.araxi <= 0 { f.text_centered(cx, 172, "THE ARAXI FALLS. SPACE FOR ANOTHER.", GOLD, true, 1); }
+                }
+            }
+        }
+        let lines = [
+            format!("Body Points: SIZE x 2 + Fortitude / 3. The {}: {} x 2 + {} / 3 = {} BP.", s.name, s.size, s.total("Fortitude"), s.bp_max()),
+            "At half your BP you are wounded: -2 to every roll. At a quarter: -4. At 0 you fall.".to_string(),
+            format!("DB, the damage bonus: (SIZE {} + Wield Weapon {}) / 3 = {}.", s.size, s.total("Wield Weapon"), s.db()),
+            "In the maze, keys 1 to 6 trade Off for Def: offensive +3/-5, defensive -5/+3, only defend +5.".to_string(),
+            "A power hit adds DB twice at -5 Off. A double attack strikes twice, each at -5 Off.".to_string(),
+            "Your torch costs -1 Off and -2 Def. The dark costs -5 and -10. Carry spare torches.".to_string(),
+        ];
+        for (n, l) in lines.iter().enumerate() { f.text_centered(W / 2, 200 + n as i32 * 12, l, TEXT, false, 1); }
     }
 }
 
@@ -2118,11 +2412,12 @@ fn draw_spikes(f: &mut Frame, x: i32, y: i32, vis: bool) {
     }
 }
 
-fn draw_die(f: &mut Frame, x: i32, y: i32, v: u8, hot: bool) {
+/// A die 9 pixels square, times `s`.
+fn draw_die(f: &mut Frame, x: i32, y: i32, v: u8, hot: bool, s: i32) {
     let face = if hot { 0xffd040 } else { 0xf0ece0 };
-    f.rect(x + 1, y, 7, 9, face);
-    f.rect(x, y + 1, 9, 7, face);
-    let pip = |f: &mut Frame, px: i32, py: i32| f.rect(x + px, y + py, 2, 2, if v == 1 || v == 6 { 0xb02020 } else { 0x181410 });
+    f.rect(x + s, y, 7 * s, 9 * s, face);
+    f.rect(x, y + s, 9 * s, 7 * s, face);
+    let pip = |f: &mut Frame, px: i32, py: i32| f.rect(x + px * s, y + py * s, 2 * s, 2 * s, if v == 1 || v == 6 { 0xb02020 } else { 0x181410 });
     let (l, m, r, t, c, b) = (1, 4, 6, 1, 4, 6);
     match v {
         1 => pip(f, m - 0, c - 0),
@@ -2132,6 +2427,28 @@ fn draw_die(f: &mut Frame, x: i32, y: i32, v: u8, hot: bool) {
         5 => { pip(f, l, t); pip(f, r, t); pip(f, m, c); pip(f, l, b); pip(f, r, b); }
         _ => { pip(f, l, t); pip(f, r, t); pip(f, l, c); pip(f, r, c); pip(f, l, b); pip(f, r, b); }
     }
+}
+
+/// Is this die the second of two 6s, or of two 1s, in a row?
+fn hot_die(dice: &[u8], n: usize) -> bool {
+    n > 0 && dice[n - 1] == dice[n] && (dice[0] == 6 && dice[n] == 6 || dice[0] == 1 && dice[n] == 1)
+}
+
+/// A labelled row of dice for the intro, landing one by one: die `start`
+/// of the page lands `start` x 0.12 seconds after the roll. The sum shows
+/// once the last is down. Returns the dice counted so far and whether
+/// this row is all down.
+fn dice_row(f: &mut Frame, x: i32, y: i32, who: &str, r: &Roll, sum: &str, c: Rgb, start: usize, age: f32) -> (usize, bool) {
+    let end = start + r.dice.len();
+    f.text(x, y + 7, who, c);
+    let mut dx = x + 44;
+    for (n, &d) in r.dice.iter().enumerate().take(8) {
+        if age < (start + n) as f32 * 0.12 { return (end, false); }
+        draw_die(f, dx, y, d, hot_die(&r.dice, n), 2);
+        dx += 21;
+    }
+    f.text(dx + 4, y + 7, sum, c);
+    (end, true)
 }
 
 fn put(f: &mut Frame, s: &Sprite, x: i32, y: i32) { f.blit(s, x - s.w / 2, y - s.h / 2); }
@@ -2297,7 +2614,30 @@ impl Game for Eliminator {
                 if input.pressed(Key::Right) || pressed('l') { self.pick = (self.pick + 1) % 3; }
                 for (i, c) in ['1', '2', '3'].iter().enumerate() { if pressed(*c) { self.pick = i; self.start(i); return Flow::Continue; } }
                 if pressed('?') { self.mode = Mode::Help; self.help_page = 0; }
+                if pressed('i') { self.open_intro(); return Flow::Continue; }
                 if input.pressed(Key::Enter) || input.pressed(Key::Space) { let p = self.pick; self.start(p); }
+            }
+            Mode::Intro => {
+                self.intro.age += dt;
+                if input.pressed(Key::Escape) { self.mode = Mode::Title; return Flow::Continue; }
+                let last = self.intro.page + 1 == INTRO_PAGES;
+                if last && input.pressed(Key::Enter) { let p = self.pick; self.start(p); return Flow::Continue; }
+                if input.pressed(Key::Left) || pressed('h') { self.intro.page = self.intro.page.saturating_sub(1); }
+                else if !last && (input.pressed(Key::Right) || pressed('l') || input.pressed(Key::Enter)) { self.intro.page += 1; }
+                else {
+                    match self.intro.page {
+                        0 => {
+                            let n = contenders()[self.pick].sheet.skills.len();
+                            if input.pressed(Key::Down) || pressed('j') { self.intro.skill = (self.intro.skill + 1) % n; }
+                            if input.pressed(Key::Up) || pressed('k') { self.intro.skill = (self.intro.skill + n - 1) % n; }
+                        }
+                        1 => {
+                            if input.pressed(Key::Space) { self.intro_roll(1); }
+                            if pressed('r') { self.intro_roll(100); }
+                        }
+                        _ => if input.pressed(Key::Space) { self.intro_blow(); },
+                    }
+                }
             }
             Mode::Help => {
                 if input.any_pressed() { self.mode = if self.p.bp > 0 && self.turn > 0 || !self.tray.is_empty() || !self.log.is_empty() { Mode::Play } else { Mode::Title }; }
@@ -2364,6 +2704,7 @@ impl Game for Eliminator {
     fn draw(&mut self, f: &mut Frame) {
         match self.mode {
             Mode::Title => { self.draw_title(f); return; }
+            Mode::Intro => { self.draw_intro(f); return; }
             Mode::Help if self.turn == 0 && self.log.is_empty() => { self.draw_title(f); self.draw_help(f); return; }
             _ => {}
         }
@@ -2544,6 +2885,42 @@ mod tests {
         let wins = (0..200).filter(|&s| duel(0, TROLL, s)).count();
         println!("Sellsword against a troll: {} of 200", wins);
         assert!(wins < 120, "{} of 200", wins);
+    }
+
+    #[test]
+    fn the_intro_walks_through_and_starts_the_game() {
+        for pick in 0..3 {
+            let mut g = Eliminator::new();
+            g.pick = pick;
+            let mut f = Frame::new(W, H);
+            let mut press = |g: &mut Eliminator, k: Key| {
+                let mut input = Input::new();
+                input.inject(k);
+                g.update(&input, 1.0 / 30.0);
+                // Let every die land before the frame is drawn.
+                g.intro.age += 9.0;
+                g.draw(&mut f);
+            };
+            press(&mut g, Key::Char('i'));
+            assert!(matches!(g.mode, Mode::Intro));
+            for _ in 0..12 { press(&mut g, Key::Down); }
+            press(&mut g, Key::Right);
+            press(&mut g, Key::Char('r'));
+            press(&mut g, Key::Space);
+            assert_eq!(g.intro.tally.iter().sum::<u32>(), 101);
+            press(&mut g, Key::Right);
+            assert_eq!(g.intro.page, 2);
+            // Strike until the Araxi falls, then once more to raise it.
+            for _ in 0..300 {
+                press(&mut g, Key::Space);
+                if g.intro.araxi <= 0 { break; }
+            }
+            assert!(g.intro.araxi <= 0);
+            press(&mut g, Key::Space);
+            assert_eq!(g.intro.araxi, KINDS[ARAXI].bp);
+            press(&mut g, Key::Enter);
+            assert!(matches!(g.mode, Mode::Play));
+        }
     }
 
     #[test]
