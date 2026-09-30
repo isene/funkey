@@ -1109,6 +1109,7 @@ impl Game for Gems {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     let mut game = Gems::new();
     // GEMS_BENCH=<frames> plays that many frames with no terminal and
@@ -1125,6 +1126,10 @@ fn main() {
     }
     run(&mut game, Config { width: W, height: H, fps: 60 });
 }
+
+// In a web page: see web/ in this repo.
+#[cfg(target_arch = "wasm32")]
+funkey::web!(Gems::new(), Config { width: W, height: H, fps: 60 });
 
 #[cfg(test)]
 mod tests {

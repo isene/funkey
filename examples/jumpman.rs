@@ -471,6 +471,11 @@ impl Game for Jumpman {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     run(&mut Jumpman::new(), Config { width: W, height: H, fps: 60 });
 }
+
+// In a web page: see web/ in this repo.
+#[cfg(target_arch = "wasm32")]
+funkey::web!(Jumpman::new(), Config { width: W, height: H, fps: 60 });

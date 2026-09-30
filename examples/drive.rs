@@ -267,6 +267,11 @@ impl Game for Drive {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     run(&mut Drive::new(), Config { width: W, height: H, fps: 30 });
 }
+
+// In a web page: see web/ in this repo.
+#[cfg(target_arch = "wasm32")]
+funkey::web!(Drive::new(), Config { width: W, height: H, fps: 30 });

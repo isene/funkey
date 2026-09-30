@@ -2272,6 +2272,15 @@ fn fancy_text(f: &mut Frame, cx: i32, y: i32, s: &str, scale: i32, time: f32) {
     }
 }
 
+/// The game with its sound on and the title tune playing.
+fn salvo() -> Salvo {
+    let mut game = Salvo::new();
+    game.audio = Audio::open();
+    game.audio.play_loop(1, &game.m_title, 0.8);
+    game
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     let mut game = Salvo::new();
     // SALVO_BENCH=<frames> plays that many frames with no terminal and
@@ -2290,10 +2299,12 @@ fn main() {
         eprintln!("{:.3} ms a frame at {}x{} over {} frames", t0.elapsed().as_secs_f64() * 1000.0 / n as f64, W, H, n);
         return;
     }
-    game.audio = Audio::open();
-    game.audio.play_loop(1, &game.m_title, 0.8);
-    run(&mut game, Config { width: W, height: H, fps: 60 });
+    run(&mut salvo(), Config { width: W, height: H, fps: 60 });
 }
+
+// In a web page: see web/ in this repo.
+#[cfg(target_arch = "wasm32")]
+funkey::web!(salvo(), Config { width: W, height: H, fps: 60 });
 
 #[cfg(test)]
 mod tests {

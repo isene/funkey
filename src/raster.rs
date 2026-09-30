@@ -628,6 +628,12 @@ impl Scene {
         let w = self.w as usize;
         let bands = f.px.chunks_mut(band * w).zip(zbuf.chunks_mut(band * w)).enumerate()
             .map(|(i, (p, z))| (i * band, p, z));
+        // One core, or a web page that cannot start threads: paint here.
+        if threads == 1 {
+            for (y0, px, zb) in bands { self.paint(y0, px, zb, sky); }
+            self.zbuf = zbuf;
+            return;
+        }
         let next = std::sync::Mutex::new(bands);
         let me = &*self;
         std::thread::scope(|s| {

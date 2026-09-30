@@ -21,6 +21,7 @@
     const fk = (await WebAssembly.instantiate(bytes, {})).instance.exports;
     fk.fk_start((Math.random() * 4294967296) >>> 0);
     const w = fk.fk_width(), h = fk.fk_height(), rate = fk.fk_rate();
+    canvas.style.aspectRatio = w + " / " + h;
 
     // The canvas in a box, and the field over it.
     const box = document.createElement("div");
@@ -165,23 +166,24 @@
   }
 
   // Every button with a data-key in `el` presses that key while a finger
-  // or the mouse is on it, so a held arrow walks.
+  // or the mouse is on it, so a held arrow walks. "ArrowUp|ArrowLeft"
+  // presses both, for a diagonal.
   function pad(el, game) {
     for (const b of el.querySelectorAll("[data-key]")) {
-      const k = b.dataset.key;
+      const ks = b.dataset.key === "|" ? ["|"] : b.dataset.key.split("|");
       let down = false;
       const up = () => {
         if (!down) return;
         down = false;
         b.classList.remove("down");
-        game.key(k, false);
+        for (const k of ks) game.key(k, false);
       };
       b.addEventListener("pointerdown", e => {
         e.preventDefault();
         b.setPointerCapture(e.pointerId);
         down = true;
         b.classList.add("down");
-        game.key(k, true);
+        for (const k of ks) game.key(k, true);
       });
       b.addEventListener("pointerup", up);
       b.addEventListener("pointercancel", up);

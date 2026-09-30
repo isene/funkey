@@ -354,6 +354,11 @@ impl Game for Invaders {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     run(&mut Invaders::new(), Config { width: W, height: H, fps: 60 });
 }
+
+// In a web page: see web/ in this repo.
+#[cfg(target_arch = "wasm32")]
+funkey::web!(Invaders::new(), Config { width: W, height: H, fps: 60 });

@@ -12,7 +12,12 @@
 # A list is a line per score, best first: "ABC 12345 40 5". The lists
 # live in FUNKEY_SCORES (default ~/funkey-scores on the server, writable
 # by www-data), outside the web root; edit a file there to take a score
-# out. One address may send a score every 15 seconds.
+# out. One address may send a score every 15 seconds; an IPv6 address
+# counts by its first four groups, the block one home or phone gets.
+#
+# What it touches: the two files in DIR, nothing else. No shell, no eval,
+# no file named by the request: the game is checked against GAMES and
+# every line against one pattern before it is kept or sent.
 
 require "digest"
 
@@ -20,6 +25,8 @@ DIR = ENV["FUNKEY_SCORES"] || "/home/geir/funkey-scores"
 GAMES = %w[stack].freeze
 KEEP = 10
 WAIT = 15
+# More recent addresses than this means a flood: turn scores away.
+CROWD = 1000
 
 # Files the web server makes stay writable for the www-data group, so the
 # lists can be edited by hand.
@@ -29,7 +36,8 @@ def reply(status, body)
   print "Status: #{status}\r\n"
   print "Content-Type: text/plain; charset=utf-8\r\n"
   print "Access-Control-Allow-Origin: *\r\n"
-  print "Cache-Control: no-store\r\n\r\n"
+  print "Cache-Control: no-store\r\n"
+  print "X-Content-Type-Options: nosniff\r\n\r\n"
   print body
   exit
 end
@@ -57,12 +65,14 @@ end
 # One score per address every WAIT seconds. Addresses are kept only as a
 # short hash, and only for that long.
 def allowed?
-  key = Digest::SHA256.hexdigest("funkey:#{ENV['REMOTE_ADDR']}")[0, 16]
+  addr = ENV["REMOTE_ADDR"].to_s
+  addr = addr.split(":").first(4).join(":") if addr.include?(":")
+  key = Digest::SHA256.hexdigest("funkey:#{addr}")[0, 16]
   now = Time.now.to_i
   File.open(File.join(DIR, "recent.txt"), File::RDWR | File::CREAT, 0o660) do |f|
     f.flock(File::LOCK_EX)
     seen = f.read.lines.map(&:split).select { |_, t| now - t.to_i < WAIT }
-    return false if seen.any? { |k, _| k == key }
+    return false if seen.size >= CROWD || seen.any? { |k, _| k == key }
     seen << [key, now.to_s]
     f.rewind
     f.truncate(0)
@@ -71,6 +81,7 @@ def allowed?
   true
 end
 
+begin
 game = ENV["QUERY_STRING"].to_s[/(?:\A|&)game=([a-z]+)/, 1]
 reply("400 Bad Request", "Which game?\n") unless GAMES.include?(game)
 path = File.join(DIR, "#{game}.txt")
@@ -81,6 +92,7 @@ when "GET", "HEAD"
 when "POST"
   len = ENV["CONTENT_LENGTH"].to_i
   reply("413 Payload Too Large", "Too long.\n") if len > 64
+  reply("400 Bad Request", "Send: ABC 12345 40 5\n") if len < 1
   entry = parse($stdin.read(len).to_s)
   reply("400 Bad Request", "Send: ABC 12345 40 5\n") unless entry
   reply("400 Bad Request", "The game cannot give that score.\n") unless possible?(*entry[1..3])
@@ -99,4 +111,10 @@ when "POST"
   end
 else
   reply("405 Method Not Allowed", "GET or POST.\n")
+end
+# Anything unexpected (the folder gone, a full disk) answers plainly; the
+# details go to the server's log, never to the caller.
+rescue StandardError => e
+  warn "funkey-scores: #{e.class}: #{e.message}"
+  reply("500 Internal Server Error", "Try again later.\n")
 end

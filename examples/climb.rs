@@ -213,7 +213,12 @@ impl Climb {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     let mut game = Climb::new();
     run(&mut game, Config { width: 128, height: 104, fps: 60 });
 }
+
+// In a web page: see web/ in this repo.
+#[cfg(target_arch = "wasm32")]
+funkey::web!(Climb::new(), Config { width: 128, height: 104, fps: 60 });
