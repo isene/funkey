@@ -10,6 +10,10 @@
 //!
 //! Left and right move, Down drops softly, Space drops hard, Up or X turns
 //! right, Z turns left, C holds, P pauses, Q or Esc quits.
+//! A top-ten game asks for three initials and puts them on the list: in a
+//! terminal the list lives on disk, in a web page the page keeps one list
+//! for everyone who plays there (server/scores.rb).
+//!
 //! Left alone on the title, the game plays itself. `STACK_LEVEL=<n>` sets
 //! the starting level, `STACK_DEMO=1` starts with the game playing itself.
 //! The music is Korobeiniki, a Russian folk song from the 1860s; the rest
@@ -30,7 +34,7 @@ const FX: i32 = (W - COLS * CELL) / 2;
 const FY: i32 = 15;
 const GAME: &str = "stack";
 /// The game's own version; the engine has its own.
-const VERSION: &str = "1.0";
+const VERSION: &str = "1.1";
 const TEXT: Rgb = 0xf0f0f0;
 const DIM: Rgb = 0x8890a8;
 const GOLD: Rgb = 0xffd040;
@@ -177,7 +181,11 @@ fn sounds() -> Sounds {
 // ------------------------------------------------------------------ the game
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-enum Mode { Title, Play, Paused, Over(f32) }
+enum Mode { Title, Play, Paused, Over(f32), Name }
+
+/// A line of the top ten.
+#[derive(Clone, Debug, PartialEq)]
+struct Entry { name: String, score: u32, lines: u32, level: u32 }
 
 /// A word that rises from the well and fades: TETRIS, COMBO 3, LEVEL 4.
 struct Popup { text: String, color: Rgb, age: f32, big: bool }
@@ -229,6 +237,18 @@ struct Stack {
     backdrop: Vec<Rgb>,
     backdrop_level: u32,
     new_high: bool,
+    /// The top ten, best first. In a web page the page brings the list
+    /// everyone shares; in a terminal it lives on disk.
+    board: Vec<Entry>,
+    /// The initials being typed after a top-ten game, the letter the
+    /// cursor is on, and where the new score landed on the list.
+    name: [u8; 3],
+    name_at: usize,
+    placed: Option<usize>,
+    /// This game's initials have been asked for (or skipped), and how long
+    /// the asking has shown: keys still falling from the game are ignored.
+    asked: bool,
+    name_t: f32,
     /// The game playing itself: its plan for the piece (turn, column), the
     /// clock between its keys, and how long the title has sat untouched.
     demo: bool,
@@ -244,15 +264,18 @@ impl Stack {
         let mut rng = Rng::from_time();
         let rain = (0..16).map(|i| (i % 7, rng.below(4) as usize, rng.range(0.0, W as f32), rng.range(-60.0, H as f32), rng.range(12.0, 34.0))).collect();
         let start_level = std::env::var("STACK_LEVEL").ok().and_then(|v| v.parse().ok()).unwrap_or(1u32).clamp(1, 15);
+        let board = parse_board(&funkey::store::load(GAME, "scores").unwrap_or_default());
+        let mut name = *b"AAA";
+        if let Some(n) = funkey::store::load(GAME, "name").filter(|n| valid_name(n)) { name.copy_from_slice(n.as_bytes()); }
         let mut g = Stack {
             mode: Mode::Title, grid: [[0; COLS as usize]; ROWS as usize], cur: Piece { kind: 0, rot: 0, x: 3, y: 0 },
             hold: None, held: false, bag: Vec::new(), queue: VecDeque::new(), rng, score: 0,
-            high: funkey::store::high_score(GAME), lines: 0, level: start_level, start_level,
+            high: funkey::store::high_score(GAME).max(board.first().map_or(0, |e| e.score)), lines: 0, level: start_level, start_level,
             fall: 0.0, lock_t: 0.0, resets: 0, lowest: 0, das_dir: 0, das_t: 0.0, arr_t: 0.0,
             last_turn: false, last_kick: 0, combo: -1, b2b: false, clearing: Vec::new(), clear_t: 0.0, clear_len: CLEAR,
             popups: Vec::new(), particles: Particles::new(), trails: Vec::new(), shake: 0.0, time: 0.0,
             fours: 0, spins: 0, best_combo: 0, rain, danger: false, backdrop: Vec::new(), backdrop_level: 0,
-            new_high: false, demo: false, plan: None, demo_t: 0.0, idle: 0.0, audio: Audio::off(), s: sounds(),
+            new_high: false, board, name, name_at: 0, placed: None, asked: false, name_t: 0.0, demo: false, plan: None, demo_t: 0.0, idle: 0.0, audio: Audio::off(), s: sounds(),
         };
         g.particles.gravity = 260.0;
         g.backdrop = backdrop(g.level);
@@ -278,6 +301,8 @@ impl Stack {
         self.spins = 0;
         self.best_combo = 0;
         self.new_high = false;
+        self.placed = None;
+        self.asked = false;
         self.danger = false;
         self.demo = false;
         self.mode = Mode::Play;
@@ -548,6 +573,62 @@ impl Stack {
         self.audio.play_loop(1, &self.s.title, 0.5);
     }
 
+    /// A top-ten score, from a game played by hand.
+    fn top_ten(&self) -> bool {
+        !self.demo && self.score > 0 && (self.board.len() < 10 || self.score > self.board[9].score)
+    }
+
+    /// A message from the web page: the shared list, or the last initials
+    /// typed in this browser.
+    fn heard(&mut self, m: &str) {
+        if let Some(t) = m.strip_prefix("scores\n") {
+            self.board = parse_board(t);
+            if let Some(top) = self.board.first() { self.high = self.high.max(top.score); }
+            if self.placed.is_some() {
+                let me = String::from_utf8_lossy(&self.name).into_owned();
+                self.placed = self.board.iter().position(|e| e.name == me && e.score == self.score);
+            }
+        } else if let Some(n) = m.strip_prefix("name ") {
+            let n = n.trim().to_ascii_uppercase();
+            if valid_name(&n) { self.name.copy_from_slice(n.as_bytes()); }
+        }
+    }
+
+    /// Initials, arcade style: type them, or turn a letter with Up and
+    /// Down and move with Left and Right. Enter puts them on the list.
+    fn name_entry(&mut self, input: &Input) {
+        for c in 'a'..='z' {
+            if input.pressed(Key::Char(c)) {
+                self.name[self.name_at] = c.to_ascii_uppercase() as u8;
+                self.name_at = (self.name_at + 1).min(2);
+            }
+        }
+        let l = &mut self.name[self.name_at];
+        if input.pressed(Key::Up) { *l = if *l >= b'Z' { b'A' } else { *l + 1 }; }
+        if input.pressed(Key::Down) { *l = if *l <= b'A' { b'Z' } else { *l - 1 }; }
+        if input.pressed(Key::Left) || input.pressed(Key::Backspace) { self.name_at = self.name_at.saturating_sub(1); }
+        if input.pressed(Key::Right) { self.name_at = (self.name_at + 1).min(2); }
+        if input.pressed(Key::Enter) { self.submit(); }
+        if input.pressed(Key::Escape) { self.mode = Mode::Over(1.0); }
+    }
+
+    /// The initials go on the list: at once here, and to the page, which
+    /// sends back the shared list; in a terminal, to disk.
+    fn submit(&mut self) {
+        let name = String::from_utf8_lossy(&self.name).into_owned();
+        let e = Entry { name: name.clone(), score: self.score, lines: self.lines, level: self.level };
+        self.placed = place(&mut self.board, e.clone());
+        self.high = self.high.max(self.score);
+        if funkey::page::web() {
+            funkey::page::send(&format!("score {} {} {} {}", e.name, e.score, e.lines, e.level));
+        } else if !cfg!(test) {
+            funkey::store::save(GAME, "scores", &board_text(&self.board));
+            funkey::store::save(GAME, "name", &name);
+        }
+        self.audio.play(&self.s.level, 0.8);
+        self.mode = Mode::Over(1.0);
+    }
+
     /// Where the game, playing itself, puts the piece: the turn and column
     /// that leave the well lowest and flattest, with full rows and few
     /// holes. The weights are Yiyuan Lee's, from his Tetris AI.
@@ -669,6 +750,7 @@ impl Game for Stack {
         self.shake = (self.shake - dt).max(0.0);
         let pressed = |c: char| input.pressed(Key::Char(c));
         let quit = input.pressed(Key::Escape) || pressed('q');
+        while let Some(m) = funkey::page::recv() { self.heard(&m); }
         match self.mode {
             Mode::Title => {
                 if quit { return Flow::Quit; }
@@ -711,7 +793,19 @@ impl Game for Stack {
             }
             Mode::Over(t) => {
                 self.mode = Mode::Over(t + dt);
-                if (t > 1.5 && input.any_pressed()) || (self.demo && t > 3.0) { self.to_title(); }
+                // Once the curtain is down, a top-ten score asks for initials.
+                if t > 0.9 && !self.asked && self.top_ten() {
+                    self.asked = true;
+                    self.name_at = 0;
+                    self.name_t = 0.0;
+                    self.mode = Mode::Name;
+                } else if (t > 2.0 && input.any_pressed()) || (self.demo && t > 3.0) {
+                    self.to_title();
+                }
+            }
+            Mode::Name => {
+                self.name_t += dt;
+                if self.name_t > 0.4 { self.name_entry(input); }
             }
         }
         if self.level != self.backdrop_level {
@@ -742,17 +836,8 @@ impl Game for Stack {
                 f.text_centered(W / 2, 124, "P GOES ON", TEXT, false, 1);
                 f.text_centered(W / 2, 134, "Q ENDS THE GAME", DIM, false, 1);
             }
-            Mode::Over(t) if t > 0.9 => {
-                f.rect(FX - 34, 78, COLS * CELL + 68, 104, 0x0a0b16);
-                f.rect(FX - 34, 78, COLS * CELL + 68, 1, 0xe04848);
-                f.rect(FX - 34, 181, COLS * CELL + 68, 1, 0xe04848);
-                f.text_centered(W / 2, 88, "GAME OVER", 0xff5a5a, true, 2);
-                f.text_centered(W / 2, 112, &format!("SCORE {}", self.score), TEXT, true, 1);
-                f.text_centered(W / 2, 124, &format!("LINES {}  LEVEL {}", self.lines, self.level), DIM, true, 1);
-                if self.new_high { fancy_text(f, W / 2, 140, "NEW HIGH SCORE", 1, self.time); }
-                else { f.text_centered(W / 2, 142, &format!("HIGH {}", self.high), GOLD, true, 1); }
-                if t > 1.5 { f.text_centered(W / 2, 166, "ANY KEY", DIM, false, 1); }
-            }
+            Mode::Over(t) if t > 0.9 => self.draw_scores(f, t),
+            Mode::Name => self.draw_name(f),
             _ => {}
         }
     }
@@ -808,7 +893,11 @@ impl Stack {
             }
         }
         // The blocks at rest, and the rows on their way out.
-        let over = if let Mode::Over(t) = self.mode { ((t * 34.0) as i32).min(ROWS - HIDDEN) } else { 0 };
+        let over = match self.mode {
+            Mode::Over(t) => ((t * 34.0) as i32).min(ROWS - HIDDEN),
+            Mode::Name => ROWS - HIDDEN,
+            _ => 0,
+        };
         let clear_p = if self.clear_len > 0.0 { 1.0 - self.clear_t / self.clear_len } else { 0.0 };
         for y in HIDDEN..ROWS {
             let px_y = oy + (y - HIDDEN) * CELL;
@@ -915,6 +1004,61 @@ impl Stack {
         }
     }
 
+    /// The top ten, a row each: rank, initials, score, level. The new
+    /// score blinks.
+    fn draw_board(&self, f: &mut Frame, x: i32, y: i32) {
+        if self.board.is_empty() {
+            f.text_centered(W / 2, y + 40, "NO SCORES YET", DIM, true, 1);
+            return;
+        }
+        for (i, e) in self.board.iter().enumerate() {
+            let yy = y + i as i32 * 12;
+            let mine = self.placed == Some(i);
+            let c = if mine { mix(GOLD, 0xffffff, 0.5 + 0.5 * (self.time * 8.0).sin()) } else { TEXT };
+            f.text_big(x, yy, &format!("{:>2}", i + 1), DIM);
+            f.text_big(x + 24, yy, &e.name, c);
+            let sc = e.score.to_string();
+            f.text_big(x + 138 - Frame::text_width(&sc, true, 1), yy, &sc, c);
+            f.text(x + 148, yy + 2, &format!("LV {}", e.level), DIM);
+        }
+    }
+
+    fn draw_scores(&self, f: &mut Frame, t: f32) {
+        let (x, y, w, h) = (W / 2 - 112, 30, 224, 212);
+        f.rect(x, y, w, h, 0x0a0b16);
+        f.rect(x, y, w, 1, 0xe04848);
+        f.rect(x, y + h - 1, w, 1, 0xe04848);
+        f.text_centered(W / 2, y + 8, "GAME OVER", 0xff5a5a, true, 2);
+        f.text_centered(W / 2, y + 28, &format!("SCORE {}   ROWS {}   LEVEL {}", self.score, self.lines, self.level), TEXT, false, 1);
+        f.text_centered(W / 2, y + 42, "HIGH SCORES", GOLD, true, 1);
+        self.draw_board(f, x + 22, y + 56);
+        if t > 2.0 { f.text_centered(W / 2, y + h - 14, "ANY KEY", DIM, false, 1); }
+    }
+
+    fn draw_name(&self, f: &mut Frame) {
+        let (x, y, w, h) = (W / 2 - 112, 30, 224, 212);
+        f.rect(x, y, w, h, 0x0a0b16);
+        f.rect(x, y, w, 1, GOLD);
+        f.rect(x, y + h - 1, w, 1, GOLD);
+        let rank = self.board.iter().position(|e| self.score > e.score).unwrap_or(self.board.len()) + 1;
+        fancy_text(f, W / 2, y + 12, if rank == 1 { "NEW HIGH SCORE" } else { "TOP TEN" }, 2, self.time);
+        f.text_centered(W / 2, y + 40, &format!("{}   RANK {}", self.score, rank), TEXT, true, 1);
+        f.text_centered(W / 2, y + 60, "YOUR INITIALS", DIM, false, 1);
+        for i in 0..3 {
+            let bx = W / 2 - 49 + i as i32 * 34;
+            let on = i == self.name_at;
+            let edge = if on { mix(GOLD, 0xffffff, 0.5 + 0.5 * (self.time * 6.0).sin()) } else { 0x3a4260 };
+            f.rect(bx, y + 72, 30, 34, edge);
+            f.rect(bx + 2, y + 74, 26, 30, 0x07080f);
+            let ch = (self.name[i] as char).to_string();
+            f.text_scaled(bx + 8, y + 79, &ch, if on { GOLD } else { TEXT }, true, 3);
+        }
+        f.text_centered(W / 2, y + 122, "TYPE THEM, OR UP AND DOWN TURN A LETTER", DIM, false, 1);
+        f.text_centered(W / 2, y + 132, "LEFT AND RIGHT MOVE    ENTER PUTS THEM ON THE LIST", DIM, false, 1);
+        f.text_centered(W / 2, y + 142, "ESC SKIPS", DIM, false, 1);
+        if funkey::page::web() { f.text_centered(W / 2, y + 166, "EVERYONE WHO PLAYS HERE SEES THIS LIST", 0x606880, false, 1); }
+    }
+
     fn draw_title(&self, f: &mut Frame) {
         for &(k, rot, x, y, _) in &self.rain {
             for (cx, cy) in cells(k, rot) {
@@ -937,10 +1081,51 @@ impl Stack {
             "FOUR ROWS AT ONCE, A T SPUN INTO ITS SLOT, CLEARS IN A ROW:",
             "THEY ALL SCORE MORE. EVERY TEN ROWS THE LEVEL GOES UP.",
         ];
-        for (i, k) in keys.iter().enumerate() { f.text_centered(W / 2, 178 + i as i32 * 10, k, DIM, false, 1); }
+        if !self.board.is_empty() && (self.time / 6.0) as i32 % 2 == 1 {
+            f.text_centered(W / 2, 172, "HIGH SCORES", GOLD, false, 1);
+            for (i, e) in self.board.iter().enumerate() {
+                let (x, y) = (W / 2 - 104 + (i as i32 / 5) * 112, 184 + (i as i32 % 5) * 8);
+                f.text(x, y, &format!("{:>2}  {}  {:>7}  LV {}", i + 1, e.name, e.score, e.level), DIM);
+            }
+        } else {
+            for (i, k) in keys.iter().enumerate() { f.text_centered(W / 2, 178 + i as i32 * 10, k, DIM, false, 1); }
+        }
         f.text_centered(W / 2, 222, "MUSIC: KOROBEINIKI, A RUSSIAN FOLK SONG. ALL ELSE NEW.", 0x606880, false, 1);
         f.text(W - 4 - Frame::text_width(VERSION, false, 1), H - 7, VERSION, 0x404860);
     }
+}
+
+/// Three capital letters.
+fn valid_name(n: &str) -> bool {
+    n.len() == 3 && n.bytes().all(|b| b.is_ascii_uppercase())
+}
+
+/// A list as text, a line per score, best first: "ABC 12345 40 5". The
+/// same text goes to disk, to the page and to the score server.
+fn board_text(b: &[Entry]) -> String {
+    b.iter().map(|e| format!("{} {} {} {}\n", e.name, e.score, e.lines, e.level)).collect()
+}
+
+fn parse_board(t: &str) -> Vec<Entry> {
+    let mut b: Vec<Entry> = t.lines().filter_map(|l| {
+        let mut w = l.split_whitespace();
+        let name = w.next()?.to_string();
+        let e = Entry { score: w.next()?.parse().ok()?, lines: w.next()?.parse().ok()?, level: w.next()?.parse().ok()?, name };
+        valid_name(&e.name).then_some(e)
+    }).collect();
+    b.sort_by(|a, c| c.score.cmp(&a.score));
+    b.truncate(10);
+    b
+}
+
+/// Put a score where it belongs on a list, below any equal one. None when
+/// it misses the top ten.
+fn place(b: &mut Vec<Entry>, e: Entry) -> Option<usize> {
+    let i = b.iter().position(|x| e.score > x.score).unwrap_or(b.len());
+    if i >= 10 { return None; }
+    b.insert(i, e);
+    b.truncate(10);
+    Some(i)
 }
 
 /// How good a well is for the game playing itself: full rows count for
@@ -1065,6 +1250,8 @@ fn fancy_text(f: &mut Frame, cx: i32, y: i32, s: &str, scale: i32, time: f32) {
 /// itself when `STACK_DEMO` is set.
 fn stack() -> Stack {
     let mut game = Stack::new();
+    // In a web page: ask for the shared list and the last initials.
+    funkey::page::send("list");
     game.audio = Audio::open();
     game.audio.play_loop(1, &game.s.title, 0.5);
     if std::env::var_os("STACK_DEMO").is_some() {
@@ -1192,6 +1379,70 @@ mod tests {
         }
         assert_eq!(g.mode, Mode::Play, "400 pieces and still going");
         assert!(g.lines >= 120, "only {} rows", g.lines);
+    }
+
+    fn ten(g: &mut Stack) {
+        g.board = (1..=10).rev().map(|i| Entry { name: "AAA".into(), score: i * 100, lines: 1, level: 1 }).collect();
+    }
+
+    fn tick(g: &mut Stack, k: Option<Key>, dt: f32) {
+        let mut i = Input::new();
+        if let Some(k) = k { i.inject(k); }
+        g.update(&i, dt);
+    }
+
+    #[test]
+    fn a_list_keeps_ten_best_first_and_reads_back_as_written() {
+        let mut b = Vec::new();
+        for (i, s) in [300, 900, 300, 50].iter().enumerate() {
+            place(&mut b, Entry { name: format!("A{}C", (b'A' + i as u8) as char), score: *s, lines: 1, level: 1 });
+        }
+        let scores: Vec<u32> = b.iter().map(|e| e.score).collect();
+        assert_eq!(scores, vec![900, 300, 300, 50]);
+        assert_eq!(b[1].name, "AAC", "the older of two equal scores stays above");
+        assert_eq!(parse_board(&board_text(&b)), b);
+        assert_eq!(parse_board("abc 1 1 1\nXYZ nine 1 1\nOK 5 1 1\n"), Vec::new(), "bad lines are skipped");
+        let mut g = quiet();
+        ten(&mut g);
+        assert_eq!(place(&mut g.board, Entry { name: "LOW".into(), score: 100, lines: 1, level: 1 }), None);
+    }
+
+    #[test]
+    fn a_top_ten_game_asks_for_initials_and_lands_on_the_list() {
+        let mut g = quiet();
+        ten(&mut g);
+        g.start();
+        g.score = 550;
+        g.game_over();
+        tick(&mut g, None, 1.0);
+        tick(&mut g, None, 0.1);
+        assert_eq!(g.mode, Mode::Name);
+        tick(&mut g, Some(Key::Space), 0.01);
+        assert_eq!(g.mode, Mode::Name, "a drop still falling from the game is ignored");
+        tick(&mut g, None, 0.5);
+        for c in ['g', 'e', 'i'] { tick(&mut g, Some(Key::Char(c)), 0.01); }
+        tick(&mut g, Some(Key::Enter), 0.01);
+        assert!(matches!(g.mode, Mode::Over(_)));
+        assert_eq!(g.placed, Some(5));
+        assert_eq!(g.board[5].name, "GEI");
+        assert_eq!(g.board.len(), 10);
+        assert_eq!(g.board[9].score, 200, "the lowest fell off");
+        // The page's copy of the list replaces ours, and the new line is found in it.
+        g.heard("scores\nZZZ 9000 40 5\nGEI 550 0 1\n");
+        assert_eq!(g.placed, Some(1));
+        assert_eq!(g.high.max(9000), g.high);
+    }
+
+    #[test]
+    fn a_score_below_the_list_asks_for_nothing() {
+        let mut g = quiet();
+        ten(&mut g);
+        g.start();
+        g.score = 50;
+        g.game_over();
+        tick(&mut g, None, 1.0);
+        tick(&mut g, None, 0.1);
+        assert!(matches!(g.mode, Mode::Over(_)));
     }
 
     #[test]

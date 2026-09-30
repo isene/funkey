@@ -4,10 +4,12 @@
 //! The page's script, web/funkey.js, does the rest: it calls `fk_start`
 //! once, `fk_key` for every key that goes down or up, and `fk_frame` on
 //! every animation frame; it paints the pixels at `fk_pixels` and plays
-//! the sound from `fk_sound`.
+//! the sound from `fk_sound`. Messages between the game and the page (see
+//! `page`) go out through `fk_out` and come in through `fk_in`.
 
 use crate::{audio, Config, Flow, Frame, Game, Input, Key};
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 
 struct Web {
     make: fn() -> Box<dyn Game>,
@@ -27,6 +29,44 @@ thread_local! {
     static WEB: RefCell<Option<Web>> = const { RefCell::new(None) };
     static NOW: Cell<f64> = const { Cell::new(0.0) };
     static SEED: Cell<u64> = const { Cell::new(1) };
+    static OUTBOX: RefCell<VecDeque<String>> = const { RefCell::new(VecDeque::new()) };
+    static INBOX: RefCell<VecDeque<String>> = const { RefCell::new(VecDeque::new()) };
+    static OUT: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+    static IN: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+}
+
+pub(crate) fn outbox_push(m: String) { OUTBOX.with(|o| o.borrow_mut().push_back(m)); }
+
+pub(crate) fn inbox_pop() -> Option<String> { INBOX.with(|i| i.borrow_mut().pop_front()) }
+
+/// The next message for the page: its length in bytes, 0 when there is
+/// none. The bytes sit at `out_ptr` until the next call.
+pub fn out_next() -> u32 {
+    let m = OUTBOX.with(|o| o.borrow_mut().pop_front());
+    OUT.with(|b| {
+        let mut b = b.borrow_mut();
+        b.clear();
+        if let Some(m) = m { b.extend_from_slice(m.as_bytes()); }
+        b.len() as u32
+    })
+}
+
+pub fn out_ptr() -> *const u8 { OUT.with(|b| b.borrow().as_ptr()) }
+
+/// Room for a message from the page, `len` bytes long.
+pub fn in_buf(len: u32) -> *mut u8 {
+    IN.with(|b| {
+        let mut b = b.borrow_mut();
+        b.clear();
+        b.resize(len as usize, 0);
+        b.as_mut_ptr()
+    })
+}
+
+/// The page has written its message into `in_buf`: hand it to the game.
+pub fn in_done() {
+    let m = IN.with(|b| String::from_utf8_lossy(&b.borrow()).into_owned());
+    INBOX.with(|i| i.borrow_mut().push_back(m));
 }
 
 /// The page's clock, in seconds.
@@ -131,5 +171,13 @@ macro_rules! web {
         pub extern "C" fn fk_rate() -> u32 { $crate::audio::RATE }
         #[no_mangle]
         pub extern "C" fn fk_sound(n: u32) -> *const f32 { $crate::web::sound(n) }
+        #[no_mangle]
+        pub extern "C" fn fk_out() -> u32 { $crate::web::out_next() }
+        #[no_mangle]
+        pub extern "C" fn fk_out_ptr() -> *const u8 { $crate::web::out_ptr() }
+        #[no_mangle]
+        pub extern "C" fn fk_in(len: u32) -> *mut u8 { $crate::web::in_buf(len) }
+        #[no_mangle]
+        pub extern "C" fn fk_in_done() { $crate::web::in_done() }
     };
 }

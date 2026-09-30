@@ -111,6 +111,25 @@
       fk.fk_key(c, down ? 1 : 0);
     }
 
+    // Messages between the game and the page's script (src/page.rs). A
+    // game built before they existed has no fk_out, and none go.
+    const enc = new TextEncoder(), dec = new TextDecoder();
+    let listener = null;
+    function send(text) {
+      if (!fk.fk_in) return;
+      const b = enc.encode(text);
+      new Uint8Array(fk.memory.buffer, fk.fk_in(b.length), b.length).set(b);
+      fk.fk_in_done();
+    }
+    function drain() {
+      // Messages wait in the game until someone listens.
+      if (!fk.fk_out || !listener) return;
+      for (let n = fk.fk_out(); n; n = fk.fk_out()) {
+        const text = dec.decode(new Uint8Array(fk.memory.buffer, fk.fk_out_ptr(), n).slice());
+        if (listener) listener(text);
+      }
+    }
+
     // Nothing runs while the game is out of sight, so a page can hold a
     // game without costing the reader's battery.
     let seen = true, running = false;
@@ -137,10 +156,12 @@
         }
       }
       pump();
+      drain();
       requestAnimationFrame(tick);
     }
     go();
-    return { key, box };
+    // The game may have spoken while it started.
+    return { key, box, send, listen: fn => { listener = fn; drain(); } };
   }
 
   // Every button with a data-key in `el` presses that key while a finger

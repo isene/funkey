@@ -38,6 +38,7 @@ pub mod doom;
 pub mod font;
 pub mod frame;
 pub mod input;
+pub mod page;
 pub mod particles;
 pub mod raster;
 pub mod rng;
