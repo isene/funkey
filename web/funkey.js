@@ -1,19 +1,41 @@
 // funkey.js: plays a funkey game built for the web (see lib.rs) in a canvas.
 //
-//   funkey.play(canvas, "eliminator.wasm")
+//   const game = await funkey.play(canvas, "eliminator.wasm");
+//   funkey.pad(element, game);   // optional: keys on the screen
 //
-// Keys go to the game while the canvas has focus. A click or a key gives
-// it focus and starts the sound: a browser plays nothing before that.
+// A clear text field lies over the canvas and takes the keys. Browsers
+// with keys of their own (gaze, qutebrowser, Vimium) pass keys to a page
+// only while a text field has the focus. funkey.pad turns the buttons in
+// an element that carry a data-key ("ArrowUp", "f", "Enter", " ") into
+// keys, for phones. The sound starts with the first click, tap or key: a
+// browser plays nothing before that.
 (function () {
   "use strict";
   // The keys with names, as src/web.rs numbers them.
   const CODES = { ArrowUp: 1, ArrowDown: 2, ArrowLeft: 3, ArrowRight: 4, Enter: 5, Escape: 6, Tab: 7, Backspace: 8 };
+  const code = k => CODES[k] || (k.length === 1 ? k.toLowerCase().codePointAt(0) : 0);
+  const touch = window.matchMedia && matchMedia("(pointer: coarse)").matches;
 
   async function play(canvas, url) {
     const bytes = await (await fetch(url)).arrayBuffer();
     const fk = (await WebAssembly.instantiate(bytes, {})).instance.exports;
     fk.fk_start((Math.random() * 4294967296) >>> 0);
     const w = fk.fk_width(), h = fk.fk_height(), rate = fk.fk_rate();
+
+    // The canvas in a box, and the field over it.
+    const box = document.createElement("div");
+    box.className = "fk";
+    box.style.position = "relative";
+    canvas.parentNode.insertBefore(box, canvas);
+    const field = document.createElement("textarea");
+    field.setAttribute("inputmode", "none");
+    field.setAttribute("autocapitalize", "off");
+    field.setAttribute("aria-label", canvas.getAttribute("aria-label") || "The game");
+    field.autocomplete = "off";
+    field.spellcheck = false;
+    field.style.cssText = "position:absolute;inset:0;width:100%;height:100%;margin:0;padding:0;border:0;"
+      + "opacity:0;resize:none;cursor:pointer;caret-color:transparent";
+    box.append(canvas, field);
 
     // The game's own pixels, then drawn a whole number of times larger,
     // so every pixel stays square at any size.
@@ -55,11 +77,10 @@
     // Keys. A key lets go with the code it went down with, whatever
     // Shift did in between.
     const held = new Map();
-    canvas.tabIndex = 0;
-    canvas.addEventListener("pointerdown", () => { canvas.focus(); wake(); });
-    canvas.addEventListener("keydown", e => {
+    field.addEventListener("pointerdown", wake);
+    field.addEventListener("keydown", e => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
-      const c = CODES[e.key] || (e.key.length === 1 ? e.key.toLowerCase().codePointAt(0) : 0);
+      const c = code(e.key);
       if (!c) return;
       e.preventDefault();
       wake();
@@ -67,13 +88,28 @@
       held.set(e.code, c);
       fk.fk_key(c, 1);
     });
-    canvas.addEventListener("keyup", e => {
+    field.addEventListener("keyup", e => {
       const c = held.get(e.code);
       if (c === undefined) return;
       held.delete(e.code);
       fk.fk_key(c, 0);
     });
-    canvas.addEventListener("blur", () => { for (const c of held.values()) fk.fk_key(c, 0); held.clear(); });
+    field.addEventListener("input", () => { field.value = ""; });
+    field.addEventListener("focus", () => box.classList.add("on"));
+    field.addEventListener("blur", () => {
+      box.classList.remove("on");
+      for (const c of held.values()) fk.fk_key(c, 0);
+      held.clear();
+    });
+
+    // Keys from buttons on the screen.
+    let tapped = false;
+    function key(name, down) {
+      const c = code(name);
+      if (!c) return;
+      if (down) { wake(); tapped = true; }
+      fk.fk_key(c, down ? 1 : 0);
+    }
 
     function tick(ms) {
       if (fk.fk_frame(ms)) {
@@ -81,21 +117,48 @@
         image.data.set(new Uint8ClampedArray(fk.memory.buffer, fk.fk_pixels(), w * h * 4));
         octx.putImageData(image, 0, 0);
         ctx.drawImage(off, 0, 0, canvas.width, canvas.height);
-        if (document.activeElement !== canvas) {
+        if (document.activeElement !== field && !tapped) {
           ctx.fillStyle = "rgba(0,0,0,0.6)";
           ctx.fillRect(0, canvas.height * 0.42, canvas.width, canvas.height * 0.16);
           ctx.fillStyle = "#ffd040";
           ctx.font = "bold " + Math.round(canvas.height / 16) + "px monospace";
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
-          ctx.fillText("CLICK TO PLAY", canvas.width / 2, canvas.height / 2);
+          ctx.fillText(touch ? "TAP TO PLAY" : "CLICK TO PLAY", canvas.width / 2, canvas.height / 2);
         }
       }
       pump();
       requestAnimationFrame(tick);
     }
     requestAnimationFrame(tick);
+    return { key, box };
   }
 
-  window.funkey = { play };
+  // Every button with a data-key in `el` presses that key while a finger
+  // or the mouse is on it, so a held arrow walks.
+  function pad(el, game) {
+    for (const b of el.querySelectorAll("[data-key]")) {
+      const k = b.dataset.key;
+      let down = false;
+      const up = () => {
+        if (!down) return;
+        down = false;
+        b.classList.remove("down");
+        game.key(k, false);
+      };
+      b.addEventListener("pointerdown", e => {
+        e.preventDefault();
+        b.setPointerCapture(e.pointerId);
+        down = true;
+        b.classList.add("down");
+        game.key(k, true);
+      });
+      b.addEventListener("pointerup", up);
+      b.addEventListener("pointercancel", up);
+      b.addEventListener("lostpointercapture", up);
+      b.addEventListener("contextmenu", e => e.preventDefault());
+    }
+  }
+
+  window.funkey = { play, pad };
 })();
