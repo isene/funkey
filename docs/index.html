@@ -100,7 +100,7 @@
     <div class="container">
       <h2>The games</h2>
       <p class="section-intro">
-        Eleven games come with the engine. Each has its own version, shown on its
+        Twelve games come with the engine. Each has its own version, shown on its
         title screen and tagged in the repo; the crate version is the engine's.
         Every one runs with <code>cargo run --release --example &lt;name&gt;</code>,
         and with <code>FUNKEY_PIXELS=kitty</code> in glass or kitty for real pixels.
@@ -110,6 +110,26 @@
       </p>
 
       <div class="grid">
+        <div class="card">
+          <img class="shot" src="img/raid.png" alt="raid: a gunship shot down over a lake, a second one coming in, a flak gun in the target box">
+          <div class="card-head">
+            <div>
+              <h3 class="card-title"><a class="card-link" href="https://github.com/isene/funkey/blob/master/examples/raid.rs">raid</a></h3>
+              <div class="card-kind">A gunship over fractal mountains</div>
+              <div class="card-version">raid-v1.0</div>
+            </div>
+          </div>
+          <p class="card-desc">
+            Six missions in the spirit of Comanche, from a radar post at dawn
+            to a fortress at night. A gun, rockets and guided missiles against
+            trucks, tanks, flak, gunboats, missile sites and other gunships.
+            The gunship follows the ground at the height you set. Hills are
+            cover: a missile site cannot see what flies low behind one. Hover
+            over the pad to rearm and repair.
+          </p>
+          <pre><span class="cmd">cargo run --release --example raid</span></pre>
+        </div>
+
         <div class="card">
           <img class="shot" src="img/stack.png" alt="stack: the game playing itself, a combo of two, the next five pieces on the right">
           <div class="card-head">

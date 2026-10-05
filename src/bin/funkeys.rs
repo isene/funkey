@@ -12,7 +12,7 @@ use crust::{Crust, Cursor, Input, Pane, Popup};
 use std::io::Write;
 use std::path::PathBuf;
 
-const VERSION: &str = "1.5";
+const VERSION: &str = "1.6";
 const PAGE: &str = "https://isene.org/funkey/";
 
 struct Game {
@@ -26,6 +26,13 @@ struct Game {
 }
 
 const GAMES: &[Game] = &[
+    Game {
+        name: "raid",
+        kind: "Gunship, in 3D",
+        blurb: "A gunship over fractal mountains",
+        keys: "Left and Right turn, Up and Down set the speed, W and S set the\nheight over the ground, A and D slide sideways. Space fires the gun,\nF a rocket, E a guided missile at the boxed target. P pauses, Q quits.\n\nSix missions. Hills are cover: a missile site cannot see what flies\nlow behind one. Hover low over the pad to rearm and repair.",
+        shot: include_bytes!("../../docs/img/raid.png"),
+    },
     Game {
         name: "stack",
         kind: "Puzzle",

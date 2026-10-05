@@ -59,7 +59,7 @@ fn main() {
 
 ## The games
 
-Ten games come with the engine, and Doom below:
+Eleven games come with the engine, and Doom below:
 
 - `climb`: a small Jumpman-style platformer, 200 lines. Ladders, coins, blobs.
 - `jumpman`: a Jumpman Junior kind of game. Five levels of girders, ladders and ropes. Bombs to collect, bullets to jump, robots to dodge. A fall from too high is the end of you. Some bombs reveal ladders or take girders away. A title tune, a high score.
@@ -70,6 +70,7 @@ Ten games come with the engine, and Doom below:
 - `salvo`: a tribute to Gradius. Seven stages with a boss each: a volcano, stone heads, crystals, living cells, the sun, a maze and the fortress. Capsules light the power-up bar one step at a time, and Z takes what is lit. Speed, missiles, the double shot, the laser, options that follow the ship, a shield. Then it all begins again, harder.
 - `eliminator`: the maze beneath the royal castle of Amar, played by the rules of the [Amar RPG](https://d6gaming.org). Five levels up to the gate, and the Raven Demon guarding it. Every roll is shown: the O6, the totals, the sum. Stances, double attacks at -5, wounds, light, fear, and marks that raise your skills. New to Amar? `i` on the title shows the three tiers, the O6 and a blow in three pages. Play it in a browser at [d6gaming.org](https://d6gaming.org/The_Eliminator_game.html).
 - `stack`: a tribute to Tetris. The seven pieces turn and kick off the walls as in modern Tetris. A bag of seven deals them, and the next five show. Hold one, drop soft or hard, clear four rows at once, spin a T into its slot, chain clears into combos. Korobeiniki plays, faster when the well fills. A top-ten game asks for three initials. Left alone on the title, it plays itself.
+- `raid`: a gunship over fractal mountains, in the spirit of Comanche. Six missions, from a radar post at dawn to a fortress at night. A gun, rockets and guided missiles against trucks, tanks, flak, gunboats, missile sites and other gunships. The gunship follows the ground at the height you set, and the hills are cover: a missile site cannot see what flies low behind one. Hover over the pad to rearm and repair.
 - `drive`: a car on a winding road over the hills, on the 3D rasterizer. Fetch the packages before the clock runs out, then more of them with less time. An arrow points at the nearest. Go fast, leave the road, regret it.
 
 ```bash
@@ -82,6 +83,7 @@ cargo run --release --example gems
 cargo run --release --example salvo
 cargo run --release --example eliminator
 cargo run --release --example stack
+cargo run --release --example raid
 ```
 
 `funkeys` is the picker: the games as cards with screenshots, Enter plays
@@ -157,7 +159,7 @@ writes the last frame. `DOOM_BENCH=1` times the renderer.
 The crate version is the engine's and moves only when the engine
 changes. Each game has its own version, shown on its title screen and
 tagged as `<game>-vX.Y`: `doom-v1.0`, `jumpman-v1.1`, `invaders-v1.0`,
-`drive-v1.0`, `soar-v1.1`, `climb-v1.0`, `castle-v1.0`, `gems-v1.3`, `salvo-v1.0`, `eliminator-v1.3`, `stack-v1.1`. The picker is `funkeys-v1.5`.
+`drive-v1.0`, `soar-v1.1`, `climb-v1.0`, `castle-v1.0`, `gems-v1.3`, `salvo-v1.0`, `eliminator-v1.3`, `stack-v1.1`, `raid-v1.0`. The picker is `funkeys-v1.6`.
 
 ## Using it
 
