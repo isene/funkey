@@ -12,7 +12,7 @@ use crust::{Crust, Cursor, Input, Pane, Popup};
 use std::io::Write;
 use std::path::PathBuf;
 
-const VERSION: &str = "1.6";
+const VERSION: &str = "1.7";
 const PAGE: &str = "https://isene.org/funkey/";
 
 struct Game {
@@ -26,6 +26,13 @@ struct Game {
 }
 
 const GAMES: &[Game] = &[
+    Game {
+        name: "vector",
+        kind: "Vector shooter",
+        blurb: "A tribute to Tempest",
+        keys: "Left and Right move the claw along the rim, Space fires down the\nlane. Z or Down is the superzapper: once a web it clears the web,\na second time it kills one. P pauses, Q quits.\n\nSixteen webs. A flipper on the rim can be shot only as it flips in.\nSpikes kill on the flight down. Left alone, it plays itself.",
+        shot: include_bytes!("../../docs/img/vector.png"),
+    },
     Game {
         name: "raid",
         kind: "Gunship, in 3D",

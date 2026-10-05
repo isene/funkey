@@ -40,3 +40,8 @@ mod salvo;
 #[path = "../examples/stack.rs"]
 #[allow(dead_code)]
 mod stack;
+
+#[cfg(feature = "vector")]
+#[path = "../examples/vector.rs"]
+#[allow(dead_code)]
+mod vector;
