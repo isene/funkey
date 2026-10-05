@@ -9,6 +9,7 @@
 //!
 //! Up and Down walk, Left and Right turn, A and D sidestep, W and S
 //! change the pace, Space hands the walk back to the autopilot, Q quits.
+//! Stone stops the walker, and so does the moat beside the bridge.
 //! `CASTLE_BENCH=100` draws that many frames with no terminal and
 //! prints the time a frame takes.
 
@@ -18,7 +19,7 @@ use std::f32::consts::{PI, TAU};
 const W: i32 = 960;
 const H: i32 = 600;
 /// The demo's own version; the engine has its own.
-const VERSION: &str = "1.0";
+const VERSION: &str = "1.1";
 /// The castle stands on a rise this high.
 const H0: f32 = 14.0;
 const WATER_Y: f32 = H0 - 1.4;
@@ -309,6 +310,28 @@ fn floor_at(x: f32, z: f32) -> f32 {
     if x.abs() < 2.7 && (-52.5..=-40.5).contains(&z) { g.max(H0 + 0.15) } else { g }
 }
 
+/// Where nobody can stand: inside the stone, or in the moat beside the bridge.
+fn blocked(x: f32, z: f32) -> bool {
+    const R: f32 = 0.7;
+    let (ax, az, half, thick) = (x.abs(), z.abs(), 35.0, 1.25 + R);
+    let round = |dx: f32, dz: f32, r: f32| dx * dx + dz * dz < (r + R) * (r + R);
+    // The curtain walls, with the gate open in the front one.
+    let gate = z < 0.0 && ax < 2.6 - R;
+    if (ax - half).abs() < thick && az < half + thick { return true; }
+    if (az - half).abs() < thick && ax < half + thick && !gate { return true; }
+    // The corner towers, the gate towers, the well and the keep.
+    if round(ax - half, az - half, 5.5) || round(ax - 5.6, z + half, 3.3) || round(x + 13.0, z + 13.0, 1.1) { return true; }
+    if ax < 11.0 + R && z > -3.0 - R && z < 19.0 + R { return true; }
+    // The gate's leaves: 2.55 long, swung 1.25 radians into the yard.
+    let (ex, ez) = (2.55 * 1.25f32.cos(), 2.55 * 1.25f32.sin());
+    let (lx, lz) = (ax - 2.6, z + half - 1.0);
+    let t = ((lx * ex + lz * ez) / (2.55 * 2.55)).clamp(0.0, 1.0);
+    if round(lx - ex * t, lz - ez * t, 0.0) { return true; }
+    // The moat, off the bridge.
+    let bridge = ax < 2.7 && (-52.5..=-40.5).contains(&z);
+    !bridge && (12.0..=24.0).contains(&rsq(x, z)) && ground(x, z) < WATER_Y - 0.8
+}
+
 fn normal_at(x: f32, z: f32, e: f32) -> V3 {
     let (dx, dz) = (ground(x + e, z) - ground(x - e, z), ground(x, z + e) - ground(x, z - e));
     V3::new(-dx, 2.0 * e, -dz).norm()
@@ -408,10 +431,13 @@ fn land_chunk(x0: f32, z0: f32, nx: usize, nz: usize, cell: f32, fine: bool, hol
 /// The fine land round the walk, the coarse land to the mountains, in
 /// chunks the scene can skip, built on every core.
 fn build_land(casters: &[Aabb], tx: &Tx) -> Vec<Model> {
-    const FINE: (f32, f32, f32, f32) = (-160.0, -480.0, 160.0, 120.0);
+    const FINE: (f32, f32, f32, f32) = (-160.0, -480.0, 160.0, 160.0);
     let mut jobs: Vec<(f32, f32, usize, usize, f32, bool)> = Vec::new();
     let (cell, per) = (4.0, 20usize);
     let (nxc, nzc) = (((FINE.2 - FINE.0) / cell) as usize / per, ((FINE.3 - FINE.1) / cell) as usize / per);
+    // The coarse land leaves a hole the size of FINE; chunks that stop short of it leave a strip with no land.
+    let chunk = per as f32 * cell;
+    assert!(nxc as f32 * chunk == FINE.2 - FINE.0 && nzc as f32 * chunk == FINE.3 - FINE.1, "the fine land is not whole chunks");
     for cz in 0..nzc { for cx in 0..nxc { jobs.push((FINE.0 + (cx * per) as f32 * cell, FINE.1 + (cz * per) as f32 * cell, per, per, cell, true)); } }
     let (cell, per, span) = (30.0, 15usize, 1800.0);
     let n = (2.0 * span / cell) as usize / per;
@@ -867,8 +893,10 @@ impl Game for Castle {
             let side = (input.held(Key::Char('d')) as i32 - input.held(Key::Char('a')) as i32) as f32;
             let v = 4.5 * self.pace;
             let (sy, cy) = self.yaw.sin_cos();
-            self.x += (sy * fwd + cy * side) * v * dt;
-            self.z += (cy * fwd - sy * side) * v * dt;
+            // Each way is tried alone, so the walker slides along a wall.
+            let (nx, nz) = (self.x + (sy * fwd + cy * side) * v * dt, self.z + (cy * fwd - sy * side) * v * dt);
+            if !blocked(nx, self.z) { self.x = nx; }
+            if !blocked(self.x, nz) { self.z = nz; }
             self.speed = ((fwd.abs() + side.abs()).min(1.0)) * v;
             self.pitch += (0.0 - self.pitch) * dt * 0.5;
         }
@@ -983,4 +1011,28 @@ fn main() {
         return;
     }
     run(&mut game, Config { width: W, height: H, fps: 30 });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stone_stops_the_walker_and_the_way_in_is_open() {
+        for w in WAY.windows(2) {
+            for i in 0..=200 {
+                let t = i as f32 / 200.0;
+                let (x, z) = (w[0].0 + (w[1].0 - w[0].0) * t, w[0].1 + (w[1].1 - w[0].1) * t);
+                assert!(!blocked(x, z), "the path is blocked at {x}, {z}");
+            }
+        }
+        // The keep, two walls, a corner tower, a gate tower, the well, a gate leaf, the moat.
+        for (x, z) in [(0.0, 8.0), (20.0, -35.0), (-35.0, 0.0), (35.0, 35.0), (5.6, -35.0), (-13.0, -13.0), (3.0, -32.8), (10.0, -46.0)] {
+            assert!(blocked(x, z), "nothing stops the walker at {x}, {z}");
+        }
+        // The yard, the bridge's edge and the meadow are open.
+        for (x, z) in [(20.0, -20.0), (-25.0, 25.0), (2.0, -46.0), (60.0, -80.0)] {
+            assert!(!blocked(x, z), "the walker is stopped at {x}, {z}");
+        }
+    }
 }
