@@ -12,7 +12,7 @@ use crust::{Crust, Cursor, Input, Pane, Popup};
 use std::io::Write;
 use std::path::PathBuf;
 
-const VERSION: &str = "1.7";
+const VERSION: &str = "1.8";
 const PAGE: &str = "https://isene.org/funkey/";
 
 struct Game {
@@ -26,6 +26,13 @@ struct Game {
 }
 
 const GAMES: &[Game] = &[
+    Game {
+        name: "marble",
+        kind: "Marble run",
+        blurb: "A tribute to Marble Madness",
+        keys: "The arrows roll the marble along the tiles: Right is down to the\nright, Down is down to the left. Two at once roll it straight.\nP pauses, Q quits.\n\nSix courses against the clock. The seconds left at a goal go on to\nthe next course. A fall, a break or a foe costs time, never a life.",
+        shot: include_bytes!("../../docs/img/marble.png"),
+    },
     Game {
         name: "vector",
         kind: "Vector shooter",

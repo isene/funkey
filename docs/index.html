@@ -100,7 +100,7 @@
     <div class="container">
       <h2>The games</h2>
       <p class="section-intro">
-        Thirteen games come with the engine. Each has its own version, shown on its
+        Fourteen games come with the engine. Each has its own version, shown on its
         title screen and tagged in the repo; the crate version is the engine's.
         Every one runs with <code>cargo run --release --example &lt;name&gt;</code>,
         and with <code>FUNKEY_PIXELS=kitty</code> in glass or kitty for real pixels.
@@ -110,6 +110,26 @@
       </p>
 
       <div class="grid">
+        <div class="card">
+          <img class="shot" src="img/marble.png" alt="marble: a blue marble on a patch of ice, a pool of acid on the road behind it and a green spring waiting ahead">
+          <div class="card-head">
+            <div>
+              <h3 class="card-title"><a class="card-link" href="https://github.com/isene/funkey/blob/master/examples/marble.rs">marble</a></h3>
+              <div class="card-kind">A tribute to Marble Madness</div>
+              <div class="card-version">marble-v1.0</div>
+            </div>
+          </div>
+          <p class="card-desc">
+            A glass ball down six sloping courses that hang in the dark,
+            against the clock. It gathers speed downhill, flies off a ramp
+            and breaks after a long fall. Steel balls shove it, green springs
+            eat it, acid melts it, and on ice the keys do little. Each loss
+            costs time, and the seconds left at a goal go on to the next
+            course. Left alone, it plays itself.
+          </p>
+          <pre><span class="cmd">cargo run --release --example marble</span></pre>
+        </div>
+
         <div class="card">
           <img class="shot" src="img/vector.png" alt="vector: a heart-shaped web, a pulsar lighting its lane white, the claw moving off along the rim">
           <div class="card-head">

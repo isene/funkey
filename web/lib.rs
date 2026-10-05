@@ -45,3 +45,8 @@ mod stack;
 #[path = "../examples/vector.rs"]
 #[allow(dead_code)]
 mod vector;
+
+#[cfg(feature = "marble")]
+#[path = "../examples/marble.rs"]
+#[allow(dead_code)]
+mod marble;
