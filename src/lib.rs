@@ -110,6 +110,7 @@ pub fn run(game: &mut dyn Game, cfg: Config) {
     let mut screen = Screen::open();
     let mut input = Input::new();
     input.set_exact(crust::Crust::supports_key_release());
+    input.keylog = std::env::var_os("FUNKEY_KEYLOG").and_then(|p| std::fs::File::create(p).ok());
     let mut frame = Frame::new(cfg.width, cfg.height);
     let step = Duration::from_secs_f64(1.0 / cfg.fps.max(1) as f64);
     let dt = step.as_secs_f32();

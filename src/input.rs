@@ -50,6 +50,9 @@ pub struct Input {
     /// True once the terminal has reported a release or a repeat: from
     /// then on a key is held exactly, from its press to its release.
     exact: bool,
+    /// With `FUNKEY_KEYLOG=<file>`: every key event as it arrives, for a
+    /// terminal where keys stick.
+    pub(crate) keylog: Option<std::fs::File>,
 }
 
 impl Input {
@@ -64,6 +67,11 @@ impl Input {
         while crust::input::Input::peek_pending() {
             let Some((name, state)) = crust::input::Input::event_ms(0) else { break };
             if name == "RESIZE" { self.resized = true; continue; }
+            if let Some(f) = &mut self.keylog {
+                use std::io::Write;
+                let what = match state { KeyState::Pressed => "press", KeyState::Repeated => "repeat", KeyState::Released => "release" };
+                let _ = writeln!(f, "{:.3} {} {}", now, if name == " " { "SPACE" } else { &name }, what);
+            }
             let Some(key) = key_from_name(&name) else { continue };
             match state {
                 KeyState::Released => { self.exact = true; self.held.remove(&key); }
