@@ -72,20 +72,26 @@ impl Input {
                 let what = match state { KeyState::Pressed => "press", KeyState::Repeated => "repeat", KeyState::Released => "release" };
                 let _ = writeln!(f, "{:.3} {} {}", now, if name == " " { "SPACE" } else { &name }, what);
             }
-            let Some(key) = key_from_name(&name) else { continue };
-            match state {
-                KeyState::Released => { self.exact = true; self.held.remove(&key); }
-                KeyState::Repeated => {
-                    self.exact = true;
-                    match self.held.get_mut(&key) {
-                        Some(h) => { h.last = now; h.repeats += 1; }
-                        None => { self.held.insert(key, Held { last: now, repeats: 1 }); }
-                    }
-                }
-                KeyState::Pressed => self.press(key, now),
-            }
+            self.key_event(&name, state, now);
         }
         self.expire(now);
+    }
+
+    /// One key event from the terminal, under crust's name for the key.
+    #[cfg(feature = "term")]
+    fn key_event(&mut self, name: &str, state: KeyState, now: f64) {
+        let Some(key) = key_from_name(name) else { return };
+        match state {
+            KeyState::Released => { self.exact = true; self.held.remove(&key); }
+            KeyState::Repeated => {
+                self.exact = true;
+                match self.held.get_mut(&key) {
+                    Some(h) => { h.last = now; h.repeats += 1; }
+                    None => { self.held.insert(key, Held { last: now, repeats: 1 }); }
+                }
+            }
+            KeyState::Pressed => self.press(key, now),
+        }
     }
 
     fn press(&mut self, key: Key, now: f64) {
@@ -184,11 +190,14 @@ fn hold_for(repeats: u32) -> f64 {
 }
 
 /// crust names keys the way rcurses did: "UP", "ENTER", "ESC", or the
-/// character itself.
+/// character itself. With Shift or Ctrl down it puts "S-" or "C-" in
+/// front. A game wants the key under it: a finger that brushes Shift
+/// while Up goes down still means Up, and "S-LEFT" let go is Left let go.
 pub fn key_from_name(name: &str) -> Option<Key> {
+    let name = name.strip_prefix("S-").or_else(|| name.strip_prefix("C-")).unwrap_or(name);
     Some(match name {
         "UP" => Key::Up, "DOWN" => Key::Down, "LEFT" => Key::Left, "RIGHT" => Key::Right,
-        "ENTER" => Key::Enter, "ESC" => Key::Escape, "TAB" => Key::Tab, "BACK" => Key::Backspace,
+        "ENTER" => Key::Enter, "ESC" => Key::Escape, "TAB" => Key::Tab, "BACK" | "WBACK" => Key::Backspace,
         " " | "SPACE" => Key::Space,
         _ => {
             let mut it = name.chars();
@@ -210,7 +219,31 @@ mod tests {
         assert_eq!(key_from_name("x"), Some(Key::Char('x')));
         assert_eq!(key_from_name("X"), Some(Key::Char('x')));
         assert_eq!(key_from_name(" "), Some(Key::Space));
-        assert_eq!(key_from_name("C-UP"), None);
+        assert_eq!(key_from_name("C-UP"), Some(Key::Up));
+        assert_eq!(key_from_name("S-LEFT"), Some(Key::Left));
+        assert_eq!(key_from_name("C-SPACE"), Some(Key::Space));
+        assert_eq!(key_from_name("C-X"), Some(Key::Char('x')));
+        assert_eq!(key_from_name("-"), Some(Key::Char('-')));
+        assert_eq!(key_from_name("F5"), None);
+    }
+
+    // Seen in salvo: Up pressed with a finger on Shift came as "S-UP" and did
+    // nothing, and Left let go in the same moment came as "S-LEFT" and stuck.
+    #[cfg(feature = "term")]
+    #[test]
+    fn a_key_with_shift_down_is_still_that_key() {
+        let mut i = Input::new();
+        let t = clock();
+        i.key_event("LEFT", KeyState::Pressed, t);
+        i.key_event("S-UP", KeyState::Pressed, t + 0.1);
+        assert!(i.held(Key::Up), "Shift+Up moves the ship up");
+        i.key_event("S-LEFT", KeyState::Released, t + 0.15);
+        assert!(!i.held(Key::Left), "Left let go with Shift down is let go");
+        i.key_event(" ", KeyState::Pressed, t + 0.2);
+        i.key_event("C-SPACE", KeyState::Released, t + 0.3);
+        assert!(!i.held(Key::Space), "and so is Space with Ctrl down");
+        i.key_event("UP", KeyState::Released, t + 0.4);
+        assert!(i.held.is_empty());
     }
 
     #[test]
