@@ -59,7 +59,7 @@ fn main() {
 
 ## The games
 
-Thirteen games come with the engine, and Doom below:
+Fourteen games come with the engine, and Doom below:
 
 - `climb`: a small Jumpman-style platformer, 200 lines. Ladders, coins, blobs.
 - `jumpman`: a Jumpman Junior kind of game. Five levels of girders, ladders and ropes. Bombs to collect, bullets to jump, robots to dodge. A fall from too high is the end of you. Some bombs reveal ladders or take girders away. A title tune, a high score.
@@ -73,6 +73,7 @@ Thirteen games come with the engine, and Doom below:
 - `raid`: a gunship over fractal mountains, in the spirit of Comanche. Six missions, from a radar post at dawn to a fortress at night. A gun, rockets and guided missiles against trucks, tanks, flak, gunboats, missile sites and other gunships. The gunship follows the ground at the height you set, and the hills are cover: a missile site cannot see what flies low behind one. Hover over the pad to rearm and repair.
 - `vector`: a tribute to Tempest. Glowing lines on black: sixteen webs seen down their length, a claw on the rim, and what climbs the lanes toward it. Flippers flip from lane to lane, tankers split in two, spikers leave spikes, fuseballs ride the edges and pulsars charge their lane. A superzapper clears the web once. The lines add their light where they cross and fade as on a vector tube. Left alone, it plays itself.
 - `marble`: a tribute to Marble Madness. A glass ball down six sloping courses that hang in the dark, against the clock. It rolls as a ball does: it gathers speed downhill, flies off a ramp and breaks after a long fall. Steel balls shove it, green springs eat it, acid melts it, and on ice the keys do little. Each loss costs time, and the seconds left at a goal go on to the next course. Left alone, it plays itself.
+- `again`: a puzzle you solve with your own past. A life is a handful of steps in a small room. Then time starts over, and the self you just were walks beside you and presses the same keys. One of you stands on a plate while the next walks through the door it opens. Twenty rooms of plates, doors, and gates that let only a past self through, or only the present one. Take back a step, a life or the room. The round that plays gains a voice with every self.
 - `drive`: a car on a winding road over the hills, on the 3D rasterizer. Fetch the packages before the clock runs out, then more of them with less time. An arrow points at the nearest. Go fast, leave the road, regret it.
 
 ```bash
@@ -88,6 +89,7 @@ cargo run --release --example stack
 cargo run --release --example raid
 cargo run --release --example vector
 cargo run --release --example marble
+cargo run --release --example again
 ```
 
 `funkeys` is the picker: the games as cards with screenshots, Enter plays
@@ -163,7 +165,7 @@ writes the last frame. `DOOM_BENCH=1` times the renderer.
 The crate version is the engine's and moves only when the engine
 changes. Each game has its own version, shown on its title screen and
 tagged as `<game>-vX.Y`: `doom-v1.0`, `jumpman-v1.1`, `invaders-v1.0`,
-`drive-v1.0`, `soar-v1.1`, `climb-v1.0`, `castle-v1.1`, `gems-v1.3`, `salvo-v1.0`, `eliminator-v1.3`, `stack-v1.1`, `raid-v1.0`, `vector-v1.0`, `marble-v1.0`. The picker is `funkeys-v1.8`.
+`drive-v1.0`, `soar-v1.1`, `climb-v1.0`, `castle-v1.1`, `gems-v1.3`, `salvo-v1.0`, `eliminator-v1.3`, `stack-v1.1`, `raid-v1.0`, `vector-v1.0`, `marble-v1.0`, `again-v1.0`. The picker is `funkeys-v1.9`.
 
 ## Using it
 

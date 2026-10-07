@@ -12,7 +12,7 @@ use crust::{Crust, Cursor, Input, Pane, Popup};
 use std::io::Write;
 use std::path::PathBuf;
 
-const VERSION: &str = "1.8";
+const VERSION: &str = "1.9";
 const PAGE: &str = "https://isene.org/funkey/";
 
 struct Game {
@@ -26,6 +26,13 @@ struct Game {
 }
 
 const GAMES: &[Game] = &[
+    Game {
+        name: "again",
+        kind: "Time-loop puzzle",
+        blurb: "Solve each room with your own past",
+        keys: "The arrows step, Space waits a step. Enter lets the rest of the\nlife run out. U takes back a step, Backspace the life, R the room.\nN and P change rooms, Q leaves.\n\nTwenty rooms. A life is a handful of steps. Then time starts over,\nand the self you just were walks beside you, pressing the same keys.",
+        shot: include_bytes!("../../docs/img/again.png"),
+    },
     Game {
         name: "marble",
         kind: "Marble run",

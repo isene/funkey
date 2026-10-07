@@ -100,7 +100,7 @@
     <div class="container">
       <h2>The games</h2>
       <p class="section-intro">
-        Fourteen games come with the engine. Each has its own version, shown on its
+        Fifteen games come with the engine. Each has its own version, shown on its
         title screen and tagged in the repo; the crate version is the engine's.
         Every one runs with <code>cargo run --release --example &lt;name&gt;</code>,
         and with <code>FUNKEY_PIXELS=kitty</code> in glass or kitty for real pixels.
@@ -110,6 +110,26 @@
       </p>
 
       <div class="grid">
+        <div class="card">
+          <img class="shot" src="img/again.png" alt="again: three selves in a room of doors and gates, and under it their steps as rows of arrows">
+          <div class="card-head">
+            <div>
+              <h3 class="card-title"><a class="card-link" href="https://github.com/isene/funkey/blob/master/examples/again.rs">again</a></h3>
+              <div class="card-kind">A time-loop puzzle</div>
+              <div class="card-version">again-v1.0</div>
+            </div>
+          </div>
+          <p class="card-desc">
+            A puzzle you solve with your own past. A life is a handful of
+            steps in a small room. Then time starts over, and the self you
+            just were walks beside you, pressing the same keys. One of you
+            stands on a plate while the next walks through the door it
+            opens. Twenty rooms, and a search proves each needs every self
+            it gives. The round that plays gains a voice with every self.
+          </p>
+          <pre><span class="cmd">cargo run --release --example again</span></pre>
+        </div>
+
         <div class="card">
           <img class="shot" src="img/marble.png" alt="marble: a blue marble on a patch of ice, a pool of acid on the road behind it and a green spring waiting ahead">
           <div class="card-head">

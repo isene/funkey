@@ -50,3 +50,8 @@ mod vector;
 #[path = "../examples/marble.rs"]
 #[allow(dead_code)]
 mod marble;
+
+#[cfg(feature = "again")]
+#[path = "../examples/again.rs"]
+#[allow(dead_code)]
+mod again;
