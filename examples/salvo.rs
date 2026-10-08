@@ -23,7 +23,7 @@ const H: i32 = 270;
 const BOT: i32 = H - 26;
 const GAME: &str = "salvo";
 /// The game's own version; the engine has its own.
-const VERSION: &str = "1.0";
+const VERSION: &str = "1.1";
 const TEXT: Rgb = 0xf0f0f0;
 const GOLD: Rgb = 0xffd040;
 /// Moves of the ship between it and its first option, and between options.
@@ -781,12 +781,15 @@ impl Salvo {
         self.mode = Mode::Play;
     }
 
-    /// Back at the last checkpoint with nothing: the start, the middle, or
-    /// just before the boss.
+    /// Back at the last checkpoint: the start, the middle, or just before
+    /// the boss. All power-ups are gone, but as in Gradius a lit bar keeps
+    /// its first step.
     fn respawn(&mut self) {
         let l = STAGES[self.stage].length;
         self.cam = [0.0, l * 0.5, l - 900.0].into_iter().filter(|&c| c <= self.cam).fold(0.0, f32::max);
+        let bar = self.bar.min(0);
         self.place();
+        self.bar = bar;
     }
 
     /// Fly on from where the camera is, with nothing: the landscape already
@@ -2351,6 +2354,20 @@ mod tests {
         g.bar = 5;
         g.collect(false);
         assert_eq!(g.bar, 0);
+    }
+
+    #[test]
+    fn a_lit_bar_keeps_one_step_after_a_death() {
+        let mut g = Salvo::new();
+        g.start_game();
+        g.speed = 2;
+        for _ in 0..4 { g.collect(false); }
+        g.respawn();
+        assert_eq!((g.bar, g.speed), (0, 0));
+        // A bar with nothing lit has nothing to keep.
+        g.take_power();
+        g.respawn();
+        assert_eq!((g.bar, g.speed), (-1, 0));
     }
 
     #[test]

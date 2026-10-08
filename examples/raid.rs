@@ -45,7 +45,7 @@ const SUN: V3 = V3::new(0.557, 0.416, 0.718);
 const GRAD: usize = 512;
 const GAME: &str = "raid";
 /// The game's own version; the engine has its own.
-const VERSION: &str = "1.0";
+const VERSION: &str = "1.1";
 const ROCKETS: u32 = 38;
 const MISSILES: u32 = 8;
 const ROUNDS: u32 = 600;
@@ -1508,7 +1508,8 @@ impl Raid {
         let (vel, peace) = (self.vel, self.mode != Mode::Fly);
         let low = self.alt - self.terrain.ground(self.x, self.y) < 10.0;
         let radar = self.foes.iter().any(|f| f.kind == Kind::Radar && !f.dead);
-        let quick = 0.85f32.powi(self.lap as i32);
+        // Each round they reload in 0.85 of the time, the first round too.
+        let quick = 0.85f32.powi(self.lap as i32 + 1);
         let (mut shots, mut puffs, mut crashes): (Vec<Shot>, Vec<Fx>, Vec<[f32; 3]>) = (Vec::new(), Vec::new(), Vec::new());
         let (mut nearest, mut locking) = (f32::MAX, false);
         let (terrain, rng) = (&self.terrain, &mut self.rng);
