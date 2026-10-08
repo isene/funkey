@@ -45,7 +45,7 @@ const SUN: V3 = V3::new(0.557, 0.416, 0.718);
 const GRAD: usize = 512;
 const GAME: &str = "raid";
 /// The game's own version; the engine has its own.
-const VERSION: &str = "1.1";
+const VERSION: &str = "1.2";
 const ROCKETS: u32 = 38;
 const MISSILES: u32 = 8;
 const ROUNDS: u32 = 600;
@@ -462,6 +462,13 @@ impl Foe {
 
     /// The middle of it: what a shot is aimed at.
     fn mid(&self) -> [f32; 3] { [self.x, self.y, self.h + self.kind.size().1] }
+
+    /// Where one who looks for it may find it: where it is, and for a
+    /// boat on patrol, all round its circle.
+    fn places(&self) -> Vec<[f32; 3]> {
+        if self.kind != Kind::Boat || self.orbit == 0.0 { return vec![self.mid()]; }
+        (0..12).map(|k| { let b = k as f32 * TAU / 12.0; [self.cx + b.sin() * self.orbit, self.cy + b.cos() * self.orbit, self.mid()[2]] }).collect()
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -550,16 +557,28 @@ fn find_site(t: &Terrain, site: Site, taken: &[(f32, f32)], rng: &mut Rng) -> (f
     best.0
 }
 
+/// Whether a gunship low over a pad at this place would see any of
+/// `marks`, from as high and as far out as it is still rearmed. Some
+/// metres are added at both ends, for the ground is levelled later.
+fn exposed(t: &Terrain, marks: &[[f32; 3]], x: f32, y: f32) -> bool {
+    let ring = [(0.0, 0.0), (12.0, 0.0), (-12.0, 0.0), (0.0, 12.0), (0.0, -12.0)];
+    let h = ring.iter().map(|&(dx, dy)| t.ground(x + dx, y + dy)).fold(f32::MIN, f32::max) + 16.0;
+    ring.iter().any(|&(dx, dy)| marks.iter().any(|&m| t.sees([x + dx, y + dy, h], [m[0], m[1], m[2] + 3.0])))
+}
+
 /// Where the gunship starts: dry ground a short flight from the site,
-/// not on a mountain and not on a shore.
-fn find_pad(t: &Terrain, site: (f32, f32), rng: &mut Rng) -> (f32, f32) {
+/// not on a mountain and not on a shore, with a hill between it and
+/// every one of `marks`. It is mended and rearmed there, so it must not
+/// be able to fight from there.
+fn find_pad(t: &Terrain, site: (f32, f32), marks: &[[f32; 3]], rng: &mut Rng) -> (f32, f32) {
     let mut best = (site, f32::MAX);
     for _ in 0..200 {
         let (a, d) = (rng.range(0.0, TAU), rng.range(380.0, 440.0));
         let (x, y) = (site.0 + a.sin() * d, site.1 + a.cos() * d);
         if !t.land(x, y) { continue; }
         let (land, high) = t.survey(x, y, 40.0);
-        let score = t.slope(x, y) * 0.3 + (1.0 - land) * 5.0 + (high - 0.45).abs() * 3.0;
+        let mut score = t.slope(x, y) * 0.3 + (1.0 - land) * 5.0 + (high - 0.45).abs() * 3.0;
+        if score < best.1 && exposed(t, marks, x, y) { score += 100.0; }
         if score < best.1 { best = ((x.rem_euclid(WORLD), y.rem_euclid(WORLD)), score); }
     }
     best.0
@@ -591,14 +610,16 @@ fn level(height: &mut [f32], c: (f32, f32), inner: f32, outer: f32, shore: bool)
 fn plan(height: &mut Vec<f32>) -> (Vec<(f32, f32)>, Vec<(f32, f32)>) {
     let mut rng = Rng::new(7);
     let (mut sites, mut pads) = (Vec::new(), Vec::new());
-    for m in &MISSIONS {
+    for (n, m) in MISSIONS.iter().enumerate() {
         // The land so far, heights only, to look for a place in.
-        let t = Terrain { levels: vec![Level { size: MAP, height: std::mem::take(height), color: Vec::new() }], day: Vec::new(), clouds: Vec::new(),
+        let mut t = Terrain { levels: vec![Level { size: MAP, height: std::mem::take(height), color: Vec::new() }], day: Vec::new(), clouds: Vec::new(),
             sites: Vec::new(), pads: Vec::new() };
         let site = find_site(&t, m.site, &sites, &mut rng);
-        let pad = find_pad(&t, site, &mut rng);
+        level(&mut t.levels[0].height, site, 85.0, 200.0, m.site == Site::Lake);
+        // What the pad must not see. Their gunships come to it anyway.
+        let marks: Vec<[f32; 3]> = muster(&t, n, site).iter().filter(|f| f.kind != Kind::Heli).flat_map(Foe::places).collect();
+        let pad = find_pad(&t, site, &marks, &mut rng);
         *height = t.levels.into_iter().next().unwrap().height;
-        level(height, site, 85.0, 200.0, m.site == Site::Lake);
         level(height, pad, 16.0, 60.0, false);
         sites.push(site);
         pads.push(pad);
@@ -2315,6 +2336,24 @@ mod tests {
     }
 
     #[test]
+    fn the_pad_sees_none_of_them() {
+        // Low over the pad the gunship is mended and rearmed: from as
+        // high and as far out as that goes, nothing may be in sight.
+        let mut game = Raid::new();
+        for n in 0..MISSIONS.len() {
+            game.begin(n);
+            let [px, py, top] = game.pad;
+            for (dx, dy) in [(0.0, 0.0), (12.0, 0.0), (-12.0, 0.0), (0.0, 12.0), (0.0, -12.0)] {
+                let eye = [px + dx, py + dy, top + 10.0];
+                // Their gunships come to it anyway.
+                for f in game.foes.iter().filter(|f| f.kind != Kind::Heli) {
+                    assert!(!f.places().iter().any(|&p| game.terrain.sees(eye, p)), "mission {}: the pad sees a {}", n + 1, f.kind.names().0);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn what_stands_on_the_ground_is_drawn_on_the_ground() {
         let mut game = alone();
         // Look at a point of the ground from 120 metres off and well above.
@@ -2356,6 +2395,8 @@ mod tests {
     #[test]
     fn the_gun_kills_what_is_in_the_box() {
         let mut game = alone();
+        // Over the levelled ground of the site, where no hill hides it.
+        game.place(60.0);
         let (s, c) = game.yaw.sin_cos();
         let mut truck = Foe::new(Kind::Truck, true);
         (truck.x, truck.y) = ((game.x + s * 120.0).rem_euclid(WORLD), (game.y + c * 120.0).rem_euclid(WORLD));
