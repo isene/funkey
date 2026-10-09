@@ -2,7 +2,7 @@
 #
 #   cargo build --release --target wasm32-unknown-unknown --features eliminator
 #
-# (or again, climb, drive, gems, invaders, jumpman, marble, salvo, stack, vector)
+# (or again, climb, drive, gems, invaders, jumpman, kart, marble, salvo, stack, vector)
 #
 # gives target/wasm32-unknown-unknown/release/funkey_web.wasm, which
 # funkey.js plays in a canvas (see index.html).
@@ -25,6 +25,7 @@ eliminator = []
 gems = []
 invaders = []
 jumpman = []
+kart = []
 marble = []
 salvo = []
 stack = []

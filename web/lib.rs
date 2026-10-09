@@ -55,3 +55,8 @@ mod marble;
 #[path = "../examples/again.rs"]
 #[allow(dead_code)]
 mod again;
+
+#[cfg(feature = "kart")]
+#[path = "../examples/kart.rs"]
+#[allow(dead_code)]
+mod kart;

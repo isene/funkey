@@ -100,7 +100,7 @@
     <div class="container">
       <h2>The games</h2>
       <p class="section-intro">
-        Fifteen games come with the engine. Each has its own version, shown on its
+        Sixteen games come with the engine. Each has its own version, shown on its
         title screen and tagged in the repo; the crate version is the engine's.
         Every one runs with <code>cargo run --release --example &lt;name&gt;</code>,
         and with <code>FUNKEY_PIXELS=kitty</code> in glass or kitty for real pixels.
@@ -110,6 +110,26 @@
       </p>
 
       <div class="grid">
+        <div class="card">
+          <img class="shot" src="img/kart.png" alt="kart: a red and a pink kart side by side on a grey road between red and white kerbs, item boxes and two more karts ahead">
+          <div class="card-head">
+            <div>
+              <h3 class="card-title"><a class="card-link" href="https://github.com/isene/funkey/blob/master/examples/kart.rs">kart</a></h3>
+              <div class="card-kind">In the spirit of Super Mario Kart</div>
+              <div class="card-version">kart-v1.0</div>
+            </div>
+          </div>
+          <p class="card-desc">
+            Eight karts on four tracks: a meadow, a beach, an icy pass and
+            a desert. The road is flat and painted the way that game
+            painted it, with the karts on it in 3D. Hop into a bend and
+            hold the drift until the sparks turn blue or orange, then let
+            go for a push. Boxes hand out six items, kinder ones to those
+            at the back. A cup is four races, at 50, 100 or 150cc.
+          </p>
+          <pre><span class="cmd">cargo run --release --example kart</span></pre>
+        </div>
+
         <div class="card">
           <img class="shot" src="img/again.png" alt="again: three selves in a room of doors and gates, and under it their steps as rows of arrows">
           <div class="card-head">

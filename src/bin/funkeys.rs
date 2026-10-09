@@ -12,7 +12,7 @@ use crust::{Crust, Cursor, Input, Pane, Popup};
 use std::io::Write;
 use std::path::PathBuf;
 
-const VERSION: &str = "1.9";
+const VERSION: &str = "1.10";
 const PAGE: &str = "https://isene.org/funkey/";
 
 struct Game {
@@ -26,6 +26,13 @@ struct Game {
 }
 
 const GAMES: &[Game] = &[
+    Game {
+        name: "kart",
+        kind: "Kart racer",
+        blurb: "In the spirit of Super Mario Kart",
+        keys: "Up is the gas, Down the brake, Left and Right steer. Space hops,\nand held through a bend it drifts: let go when the sparks turn\nblue or orange for a push. X uses the item. P pauses, Q quits.\n\nEight karts, four tracks, three classes. A cup is four races of\nthree laps, and the best finishes take the most points.",
+        shot: include_bytes!("../../docs/img/kart.png"),
+    },
     Game {
         name: "again",
         kind: "Time-loop puzzle",
