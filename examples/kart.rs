@@ -26,7 +26,7 @@ const W: i32 = 640;
 const H: i32 = 400;
 const GAME: &str = "kart";
 /// The game's own version; the engine has its own.
-const VERSION: &str = "1.0";
+const VERSION: &str = "1.1";
 const FOCAL: f32 = W as f32 * 0.62;
 /// The world is this many metres a side, and as many cells.
 const SIZE: usize = 512;
@@ -451,7 +451,7 @@ impl Track {
 }
 
 /// The sky along a line of sight: two rows of hills, and clouds.
-fn sky(th: &Theme, paint: &Paint, d: V3) -> Rgb {
+fn sky_at(th: &Theme, paint: &Paint, d: V3) -> Rgb {
     let (a, up) = (bearing(d.x, d.z), d.y);
     let [near, far] = paint.hills(a);
     if up < th.rise * near { return mix(th.hills[1], th.sky[1], 0.25); }
@@ -529,6 +529,8 @@ struct Car {
     lap_from: f32,
     lane: f32,
     skill: f32,
+    /// How far the wheels have rolled.
+    roll: f32,
 }
 
 impl Car {
@@ -600,6 +602,7 @@ impl Car {
         if slip.abs() > 0.7 { self.way = self.head - 0.7 * slip.signum(); }
         self.x += self.way.sin() * self.v * dt;
         self.z += self.way.cos() * self.v * dt;
+        self.roll += self.v * dt;
         self.locate(t);
         // The barrier turns the kart along itself and takes speed for it.
         let edge = t.limit - RADIUS;
@@ -649,19 +652,204 @@ struct Loose { kind: Kind, x: f32, z: f32, way: f32, s: f32, lat: f32, age: f32,
 const BOLT: f32 = 48.0;
 const SEEK: f32 = 50.0;
 
-/// The models that are the same on every track.
-struct Models { karts: Vec<Model>, shadow: Model, slick: Model, chest: Model }
+/// Where the sun stands, the same over every track.
+const SUN: V3 = V3 { x: -0.46, y: 0.76, z: 0.46 };
 
-/// A wheel: an eight-sided drum on its side.
-fn wheel(m: &mut Model, x: f32, z: f32, r: f32, w: f32) {
-    let rim = |k: u32, x: f32| { let a = k as f32 / 8.0 * TAU; V3::new(x, r + a.cos() * r, z + a.sin() * r) };
-    for k in 0..8 {
-        face(m, [rim(k, x - w / 2.0), rim(k + 1, x - w / 2.0), rim(k + 1, x + w / 2.0), rim(k, x + w / 2.0)], rim(k, x).add(rim(k, x).sub(V3::new(x, r, z))), Mat::Flat(0x202024), 1.0);
-        for side in [-1.0f32, 1.0] {
-            let hub = V3::new(x + side * w / 2.0, r, z);
-            face(m, [hub, rim(k, hub.x), rim(k + 1, hub.x), rim(k + 1, hub.x)], V3::new(x + side * 9.0, r, z), Mat::Flat(0x44444c), 1.0);
+/// A colour as red, green and blue from 0 to 1.
+fn tone(c: Rgb) -> [f32; 3] { [(c >> 16 & 255) as f32 / 255.0, (c >> 8 & 255) as f32 / 255.0, (c & 255) as f32 / 255.0] }
+
+/// A shape of smooth skins. Every corner has a place, the way its skin
+/// faces, a colour and a shine. The light is worked out afresh for each
+/// frame, so a kart that turns under the sun shows it.
+#[derive(Clone, Default)]
+struct Shape { model: Model, face: Vec<V3>, tint: Vec<[f32; 3]>, shine: Vec<f32> }
+
+impl Shape {
+    /// A skin over a row of rings with the same count of points each.
+    /// `tint(ring, point, place)` colours a corner.
+    fn skin(&mut self, rings: &[Vec<V3>], shine: f32, tint: &dyn Fn(usize, usize, V3) -> Rgb) { self.wrap(rings, None, shine, tint); }
+
+    /// The same, for a skin too flat to have a middle to face away
+    /// from: it faces away from `inside`.
+    fn wrap(&mut self, rings: &[Vec<V3>], inside: Option<V3>, shine: f32, tint: &dyn Fn(usize, usize, V3) -> Rgb) {
+        let (base, n) = (self.model.verts.len(), rings[0].len());
+        for (r, ring) in rings.iter().enumerate() {
+            for (k, &p) in ring.iter().enumerate() {
+                self.model.verts.push(Vert::new(p, 0.0, 0.0, 1.0));
+                self.tint.push(tone(tint(r, k, p)));
+                self.shine.push(shine);
+                self.face.push(V3::default());
+            }
+        }
+        let at = |r: usize, k: usize| (base + r * n + k % n) as u32;
+        let from = self.model.tris.len();
+        for r in 0..rings.len() - 1 {
+            for k in 0..n {
+                self.model.tris.push(([at(r, k), at(r, k + 1), at(r + 1, k + 1)], Mat::Flat(0xffffff)));
+                self.model.tris.push(([at(r, k), at(r + 1, k + 1), at(r + 1, k)], Mat::Flat(0xffffff)));
+            }
+        }
+        // Out is away from the middle of the skin, for most of its faces.
+        let mid = inside.unwrap_or_else(|| self.model.verts[base..].iter().fold(V3::default(), |m, v| m.add(v.p)).mul(1.0 / (rings.len() * n) as f32));
+        let lie = |m: &Model, t: [u32; 3]| {
+            let (a, b, c) = (m.verts[t[0] as usize].p, m.verts[t[1] as usize].p, m.verts[t[2] as usize].p);
+            (b.sub(a).cross(c.sub(a)), a.add(b).add(c).mul(1.0 / 3.0))
+        };
+        let out: f32 = self.model.tris[from..].iter().map(|&(t, _)| { let (n, c) = lie(&self.model, t); n.dot(c.sub(mid)) }).sum();
+        for i in from..self.model.tris.len() {
+            if out < 0.0 { self.model.tris[i].0.swap(1, 2); }
+            let t = self.model.tris[i].0;
+            let (n, _) = lie(&self.model, t);
+            for v in t { self.face[v as usize] = self.face[v as usize].add(n); }
+        }
+        for f in &mut self.face[base..] { *f = f.norm(); }
+    }
+
+    /// Light the shape as it stands turned by `turn`: the sky from above,
+    /// the sun from its side, and a glint where the sun mirrors to the
+    /// eye (`half` is midway between the two).
+    fn light(&mut self, turn: &M4, half: V3, sky: [f32; 3], glow: [f32; 3]) {
+        for (i, v) in self.model.verts.iter_mut().enumerate() {
+            let n = turn.apply_dir(self.face[i]);
+            let (day, up) = (n.dot(SUN).max(0.0), n.y * 0.5 + 0.5);
+            let g = n.dot(half).max(0.0);
+            let g = g * g * g * g;
+            let g = g * g * g * g;
+            let glint = self.shine[i] * g * g;
+            for c in 0..3 { v.lit[c] = (self.tint[i][c] * (sky[c] * (0.26 + 0.3 * up) + 0.62 * day) + glint) * glow[c]; }
         }
     }
+
+    fn bound(mut self) -> Shape { self.model.bound(); self }
+}
+
+/// A ring of `n` points round `c`. `ax` and `ay` are its half sizes
+/// along two axes, and `square` runs from 1, an ellipse, towards 0, a box.
+fn hoop(c: V3, ax: V3, ay: V3, square: f32, n: usize) -> Vec<V3> {
+    (0..n).map(|k| {
+        let (s, co) = ((k as f32 + 0.5) / n as f32 * TAU).sin_cos();
+        c.add(ax.mul(co.signum() * co.abs().powf(square))).add(ay.mul(s.signum() * s.abs().powf(square)))
+    }).collect()
+}
+
+/// Rings across the length of the kart, `x` off its middle: each row is
+/// where along it, half the width, half the height and how high.
+fn hull(rows: &[[f32; 4]], x: f32, square: f32, n: usize) -> Vec<Vec<V3>> {
+    rows.iter().map(|r| hoop(V3::new(x, r[3], r[0]), V3::new(r[1], 0.0, 0.0), V3::new(0.0, r[2], 0.0), square, n)).collect()
+}
+
+/// Rings one above the other: each row is how high, how far forward,
+/// half the width and half the depth.
+fn stack(rows: &[[f32; 4]], square: f32, n: usize) -> Vec<Vec<V3>> {
+    rows.iter().map(|r| hoop(V3::new(0.0, r[0], r[1]), V3::new(r[2], 0.0, 0.0), V3::new(0.0, 0.0, r[3]), square, n)).collect()
+}
+
+/// Round rings along a path, `r` thick. `shut` closes both ends.
+fn tube(path: &[V3], r: f32, n: usize, shut: bool) -> Vec<Vec<V3>> {
+    let (mut u, mut rings, last) = (V3::new(0.3, 0.9, 0.3), Vec::new(), path.len() - 1);
+    for i in 0..=last {
+        let d = path[(i + 1).min(last)].sub(path[i.saturating_sub(1)]).norm();
+        // The ring keeps its turn from the one before, so the skin does not twist.
+        u = u.sub(d.mul(u.dot(d))).norm();
+        let v = d.cross(u);
+        if shut && i == 0 { rings.push(hoop(path[i], u.mul(r * 0.1), v.mul(r * 0.1), 1.0, n)); }
+        rings.push(hoop(path[i], u.mul(r), v.mul(r), 1.0, n));
+        if shut && i == last { rings.push(hoop(path[i], u.mul(r * 0.1), v.mul(r * 0.1), 1.0, n)); }
+    }
+    rings
+}
+
+/// The rings of a ball, from its foot to its top.
+fn ball(c: V3, r: V3, n: usize, m: usize) -> Vec<Vec<V3>> {
+    (0..=m).map(|i| {
+        let (s, co) = (i as f32 / m as f32 * PI).sin_cos();
+        let s = s.max(0.04);
+        hoop(V3::new(c.x, c.y - r.y * co, c.z), V3::new(r.x * s, 0.0, 0.0), V3::new(0.0, 0.0, r.z * s), 1.0, n)
+    }).collect()
+}
+
+/// A kart nearer than this is drawn with every corner.
+const FINE: f32 = 14.0;
+
+/// Where the wheels sit: across, along, the radius and the width. The
+/// front pair comes first.
+const WHEELS: [[f32; 4]; 4] = [[-0.68, 0.62, 0.25, 0.24], [0.68, 0.62, 0.25, 0.24], [-0.72, -0.62, 0.32, 0.34], [0.72, -0.62, 0.32, 0.34]];
+
+/// A wheel on an axle along x, its rim on the +x side: a tyre with round
+/// shoulders, and a dished rim whose spokes show the wheel turn. The
+/// coarse one is for karts far off.
+fn wheel_shape(r: f32, w: f32, fine: bool) -> Shape {
+    let n = if fine { 14 } else { 8 };
+    let lathe = |rows: &[[f32; 2]]| -> Vec<Vec<V3>> {
+        rows.iter().map(|p| hoop(V3::new(p[0], 0.0, 0.0), V3::new(0.0, p[1], 0.0), V3::new(0.0, 0.0, p[1]), 1.0, n)).collect()
+    };
+    let (h, mut s) = (w / 2.0, Shape::default());
+    let rim: &dyn Fn(usize, usize, V3) -> Rgb = &|ring, k, p| if p.y * p.y + p.z * p.z < r * r * 0.01 { 0xf0c030 } else if ring == 0 || k * 8 / n % 2 == 0 { 0xe8eaee } else { 0x34363e };
+    if fine {
+        s.skin(&lathe(&[[-h + 0.03, r * 0.05], [-h, r * 0.82], [-h * 0.55, r], [h * 0.55, r], [h, r * 0.82], [h - 0.02, r * 0.64]]), 0.12, &|_, _, _| 0x1e1e22);
+        s.wrap(&lathe(&[[h - 0.02, r * 0.64], [h - 0.07, r * 0.52], [h - 0.06, r * 0.2], [h - 0.03, r * 0.03]]), Some(V3::new(-9.0, 0.0, 0.0)), 0.7, rim);
+    } else {
+        s.skin(&lathe(&[[-h, r * 0.05], [-h, r * 0.9], [h, r * 0.9], [h - 0.02, r * 0.64]]), 0.12, &|_, _, _| 0x1e1e22);
+        s.wrap(&lathe(&[[h - 0.02, r * 0.64], [h - 0.05, r * 0.3], [h - 0.03, r * 0.03]]), Some(V3::new(-9.0, 0.0, 0.0)), 0.7, rim);
+    }
+    s.bound()
+}
+
+/// A kart with its driver and without its wheels, the nose along +z.
+/// The coarse one is for karts far off: the same shape with a quarter
+/// of the corners.
+fn kart_shape(paint: Rgb, suit: Rgb, fine: bool) -> Shape {
+    // Points round a large part and round a small one.
+    let (n, m) = if fine { (12, 6) } else { (6, 4) };
+    let (dark, trim, steel, white) = (0x26282e, 0xdcdfe4, 0x9aa0a8, 0xf4f4f4);
+    let (v, mut s) = (V3::new, Shape::default());
+    let one = |c: Rgb| move |_: usize, _: usize, _: V3| c;
+    // Every other ring of a long part is left out of the coarse kart.
+    let thin = |rows: &[[f32; 4]]| -> Vec<[f32; 4]> { rows.iter().enumerate().filter(|(i, _)| fine || i % 2 == 0 || *i == rows.len() - 1).map(|(_, r)| *r).collect() };
+    // The tub, and the cowl with its stripe.
+    s.skin(&hull(&thin(&[[-1.04, 0.03, 0.02, 0.3], [-1.02, 0.3, 0.08, 0.3], [-0.9, 0.45, 0.14, 0.31], [-0.5, 0.5, 0.15, 0.31], [0.15, 0.47, 0.15, 0.31],
+        [0.55, 0.36, 0.13, 0.29], [0.9, 0.25, 0.11, 0.27], [1.1, 0.15, 0.08, 0.25], [1.2, 0.02, 0.02, 0.24]]), 0.0, 0.55, n), 0.6, &one(paint));
+    s.skin(&hull(&thin(&[[0.0, 0.03, 0.03, 0.5], [0.03, 0.2, 0.2, 0.46], [0.3, 0.19, 0.17, 0.44], [0.7, 0.15, 0.11, 0.38], [1.0, 0.1, 0.06, 0.3], [1.08, 0.02, 0.02, 0.27]]), 0.0, 0.7, n),
+        0.8, &|_, k, _| if fine && k == n / 4 { white } else { paint });
+    // The pods between the wheels, the bumpers and the axles.
+    for side in [-1.0f32, 1.0] {
+        s.skin(&hull(&[[-0.27, 0.02, 0.02, 0.27], [-0.24, 0.12, 0.1, 0.27], [0.3, 0.12, 0.1, 0.27], [0.36, 0.02, 0.02, 0.26]], side * 0.6, 0.5, m), 0.5, &one(trim));
+    }
+    s.skin(&tube(&[v(-0.64, 0.19, 0.93), v(-0.5, 0.19, 1.2), v(0.0, 0.19, 1.28), v(0.5, 0.19, 1.2), v(0.64, 0.19, 0.93)], 0.055, m, fine), 0.9, &one(trim));
+    s.skin(&tube(&[v(-0.52, 0.27, -0.98), v(-0.42, 0.27, -1.14), v(0.42, 0.27, -1.14), v(0.52, 0.27, -0.98)], 0.05, m, fine), 0.9, &one(trim));
+    if fine { for z in [0.62, -0.62] { s.skin(&tube(&[v(-0.62, 0.28, z), v(0.62, 0.28, z)], 0.03, 4, false), 0.2, &one(dark)); } }
+    // The seat, the engine and its pipes.
+    s.skin(&stack(&[[0.36, -0.6, 0.03, 0.02], [0.4, -0.6, 0.27, 0.07], [0.66, -0.67, 0.28, 0.07], [0.82, -0.71, 0.25, 0.06], [0.88, -0.72, 0.09, 0.03]], 0.6, n.min(10)), 0.4,
+        &|_, _, p| if p.z > -0.66 { dark } else { paint });
+    s.skin(&hull(&[[-1.0, 0.03, 0.03, 0.5], [-0.98, 0.24, 0.13, 0.5], [-0.76, 0.24, 0.13, 0.5], [-0.74, 0.03, 0.03, 0.5]], 0.0, 0.5, m), 0.5, &one(steel));
+    for side in [-1.0f32, 1.0] {
+        let pipe = tube(&[v(side * 0.17, 0.54, -0.92), v(side * 0.2, 0.58, -1.1), v(side * 0.2, 0.74, -1.22), v(side * 0.2, 0.88, -1.26)], 0.055, m, fine);
+        let mouth = pipe.len() - 1;
+        s.skin(&pipe, 1.0, &|ring, _, _| if fine && ring == mouth { 0x101014 } else { 0xc4c8d0 });
+    }
+    // The driver: body, legs, arms and hands.
+    s.skin(&stack(&[[0.36, -0.44, 0.03, 0.03], [0.4, -0.44, 0.19, 0.14], [0.62, -0.47, 0.21, 0.14], [0.82, -0.47, 0.24, 0.13], [0.92, -0.46, 0.18, 0.11], [0.98, -0.45, 0.07, 0.06]],
+        0.8, n), 0.1, &one(suit));
+    for side in [-1.0f32, 1.0] {
+        s.skin(&tube(&[v(side * 0.11, 0.44, -0.4), v(side * 0.14, 0.56, -0.08), v(side * 0.13, 0.46, 0.12)], 0.075, m, fine), 0.1, &one(suit));
+        s.skin(&tube(&[v(side * 0.26, 0.84, -0.45), v(side * 0.32, 0.66, -0.22), v(side * 0.17, 0.69, 0.02)], 0.06, m, fine), 0.1, &one(suit));
+        if fine { s.skin(&ball(v(side * 0.15, 0.7, 0.05), v(0.065, 0.065, 0.065), 6, 3), 0.2, &one(white)); }
+    }
+    // The steering wheel on its column, leaning towards the driver.
+    if fine {
+        s.skin(&tube(&[v(0.0, 0.5, 0.32), v(0.0, 0.71, 0.09)], 0.025, 4, false), 0.2, &one(dark));
+        let rim: Vec<V3> = (0..=8).map(|i| { let (sn, cs) = (i as f32 / 8.0 * TAU).sin_cos(); v(cs * 0.14, 0.71 - sn * 0.74 * 0.14, 0.09 - sn * 0.67 * 0.14) }).collect();
+        s.skin(&tube(&rim, 0.025, 4, false), 0.3, &one(dark));
+    }
+    // The helmet, with a visor and a stripe over the top.
+    let head = v(0.0, 1.16, -0.42);
+    s.skin(&ball(head, v(0.23, 0.22, 0.24), if fine { 12 } else { 8 }, if fine { 8 } else { 5 }), 1.0, &|_, _, p| {
+        let d = p.sub(head).mul(1.0 / 0.23);
+        if d.z > 0.3 && d.y > -0.3 && d.y < 0.4 { 0x141c2a } else if d.x.abs() < 0.2 { white } else { paint }
+    });
+    // Less light finds its way under the kart.
+    for (t, p) in s.tint.iter_mut().zip(&s.model.verts) { let k = (0.55 + p.p.y * 1.5).min(1.0); *t = t.map(|c| c * k); }
+    s.bound()
 }
 
 /// A flat eight-sided patch on the ground.
@@ -673,32 +861,31 @@ fn patch(r: f32, c: Rgb) -> Model {
     m
 }
 
-fn kart_model(paint: Rgb, suit: Rgb) -> Model {
-    let b = |x0: f32, y0: f32, z0: f32, x1: f32, y1: f32, z1: f32, c: Rgb| Model::block(V3::new(x0, y0, z0), V3::new(x1, y1, z1), Mat::Flat(c), 1.0, 99.0);
-    let mut m = Model::new();
-    for part in [
-        b(-0.5, 0.16, -0.95, 0.5, 0.4, 0.75, paint),        // the floor
-        b(-0.28, 0.2, 0.75, 0.28, 0.36, 1.15, paint),       // the nose
-        b(-0.62, 0.14, 1.05, 0.62, 0.24, 1.25, 0xe8e8e8),   // the bumper
-        b(-0.34, 0.4, -0.72, 0.34, 0.92, -0.58, 0x303038),  // the seat
-        b(-0.3, 0.4, -1.0, 0.3, 0.66, -0.72, 0x70747c),     // the engine
-        b(-0.24, 0.4, -0.58, 0.24, 0.86, -0.24, suit),      // the driver
-        b(-0.18, 0.86, -0.54, 0.18, 1.16, -0.24, 0xf0c098), // the head
-        b(-0.2, 0.92, -0.6, 0.2, 1.24, -0.42, paint),       // the helmet, and its peak
-        b(-0.2, 1.08, -0.42, 0.2, 1.24, -0.12, paint),
-        b(-0.04, 0.4, 0.1, 0.04, 0.72, 0.16, 0x303038),     // the wheel and its column
-        b(-0.2, 0.66, 0.06, 0.2, 0.74, 0.14, 0x202020),
-    ] { m.extend(&part, &M4::identity()); }
-    for (x, z, r, w) in [(-0.66, 0.62, 0.24, 0.2), (0.66, 0.62, 0.24, 0.2), (-0.7, -0.62, 0.3, 0.28), (0.7, -0.62, 0.3, 0.28)] { wheel(&mut m, x, z, r, w); }
-    shade(&mut m);
-    m
+/// How dark the karts' shadows make the ground at a spot. `near` has a
+/// bit for each kart close enough to ask.
+fn shadow(spots: &[[f32; 6]; KARTS], mut near: u8, x: f32, z: f32) -> f32 {
+    let mut dark = 0.0f32;
+    while near != 0 {
+        let s = &spots[near.trailing_zeros() as usize];
+        near &= near - 1;
+        let (dx, dz) = (x - s[0], z - s[1]);
+        let (along, across) = (dx * s[2] + dz * s[3], dx * s[3] - dz * s[2]);
+        let q = (along * along * 0.6 + across * across * 1.1) * s[4];
+        if q < 1.0 { dark = dark.max(s[5] * (1.0 - q * q)); }
+    }
+    dark
 }
+
+/// The models that are the same on every track: each kart fine and
+/// coarse, and the front and the rear wheel likewise.
+struct Models { karts: Vec<[Shape; 2]>, wheels: [[Shape; 2]; 2], slick: Model, chest: Model }
 
 impl Models {
     fn new(tex: &Tex) -> Models {
         let mut chest = Model::block(V3::new(-0.55, -0.55, -0.55), V3::new(0.55, 0.55, 0.55), Mat::Tex(tex.chest), 1.1, 99.0);
         shade(&mut chest);
-        Models { karts: (0..KARTS).map(|n| kart_model(PAINT[n], SUIT[n])).collect(), shadow: patch(1.0, 0x181c18), slick: patch(1.2, 0x101018), chest }
+        let wheels = [true, false].map(|fine| [0, 2].map(|w| wheel_shape(WHEELS[w][2], WHEELS[w][3], fine)));
+        Models { karts: (0..KARTS).map(|n| [true, false].map(|fine| kart_shape(PAINT[n], SUIT[n], fine))).collect(), wheels, slick: patch(1.2, 0x101018), chest }
     }
 }
 
@@ -762,6 +949,11 @@ struct Kart {
     tex: Tex,
     models: Models,
     paint: Paint,
+    /// The ground in squares of one metre: a bit for each kart whose
+    /// shadow may fall there, and where each shadow lies. The squares
+    /// repeat every 128 metres, which costs a wasted look far off.
+    shade: Box<[u8; 16384]>,
+    spots: [[f32; 6]; KARTS],
     track: Track,
     class: usize,
     race: usize,
@@ -809,7 +1001,7 @@ impl Kart {
         let tex = textures(&mut scene);
         let kept = |key: String| funkey::store::load(GAME, &key).and_then(|s| s.parse::<f32>().ok()).unwrap_or(0.0);
         let mut game = Kart {
-            models: Models::new(&tex), track: Track::build(&PLANS[0], &tex), scene, tex, paint: Paint::new(), class: 1, race: 0, cars: Vec::new(), place: [0; KARTS],
+            models: Models::new(&tex), track: Track::build(&PLANS[0], &tex), scene, tex, paint: Paint::new(), shade: Box::new([0; 16384]), spots: [[0.0; 6]; KARTS], class: 1, race: 0, cars: Vec::new(), place: [0; KARTS],
             order: Vec::new(), grid: [0; KARTS], points: [0; KARTS], gained: [0; KARTS], loose: Vec::new(), fx: Vec::new(), crates: Vec::new(), mode: Mode::Title,
             time: 0.0, clock: 0.0, count: 0.0, timer: 0.0, rev: 0.0, cam: 0.0, eye: 0, paused: false, auto: false, flash: 0.0, wrong: 0.0, note: None, lap_best: 0.0,
             best: [0, 1, 2, 3].map(|i| kept(format!("lap{i}"))), cups: [0, 1, 2].map(|i| kept(format!("cup{i}")) as u32),
@@ -1177,12 +1369,18 @@ fn nth(place: usize) -> String { format!("{}{}", place + 1, ["ST", "ND", "RD", "
 impl Kart {
     /// The track and all that is on it, from behind the kart the camera follows.
     fn view(&mut self, f: &mut Frame) {
-        let (th, k) = (self.theme(), &self.cars[self.eye]);
+        let k = &self.cars[self.eye];
         let back = 5.6 + k.boost.min(0.6) * 1.5;
         let cam = Cam3 { pos: V3::new(k.x - self.cam.sin() * back, 2.4, k.z - self.cam.cos() * back), yaw: self.cam, pitch: -0.2, focal: FOCAL };
-        let (sn, cs) = self.cam.sin_cos();
+        self.picture(f, &cam);
+    }
+
+    /// The world as a camera sees it.
+    fn picture(&mut self, f: &mut Frame, cam: &Cam3) {
+        let th = self.theme();
+        let (sn, cs) = cam.yaw.sin_cos();
         let seen = |x: f32, z: f32, far: f32| { let d = (x - cam.pos.x) * sn + (z - cam.pos.z) * cs; d > -3.0 && d < far };
-        self.scene.begin(&cam);
+        self.scene.begin(cam);
         for m in &self.track.walls { if seen(m.centre.x, m.centre.z, 320.0) { self.scene.push(m, &M4::identity()); } }
         for &(p, size) in &self.track.trees {
             if seen(p.x, p.z, 280.0) { self.scene.billboard(p, size * SLIM[th.tree], size, Mat::Tex(self.tex.trees[th.tree]), [1.0; 3]); }
@@ -1199,20 +1397,40 @@ impl Kart {
                 Kind::Seeker => self.scene.billboard(V3::new(o.x, 0.1, o.z), 0.9, 0.9, Mat::Tex(self.tex.puff), [2.0, 0.3, 0.3]),
             }
         }
+        // The light from the sky takes a little of the sky's colour.
+        let hue = tone(th.sky[1]);
+        let sky = hue.map(|c| 0.55 + 0.45 * c / hue[0].max(hue[1]).max(hue[2]));
+        self.shade.fill(0);
         for (n, k) in self.cars.iter().enumerate() {
-            if !seen(k.x, k.z, 250.0) { continue; }
             let size = if k.small > 0.0 { 0.6 } else { 1.0 };
-            let m = M4::scale(size).then(&M4::rotate_z(k.steer * 0.06 + k.drift * 0.08)).then(&M4::rotate_y(k.head + k.spin / 1.2 * 2.0 * TAU + k.drift * 0.25))
-                .then(&M4::translate(V3::new(k.x, (k.air / HOP * PI).sin() * 0.45, k.z)));
-            if k.star > 0.0 {
-                // A star runs through the colours.
-                let (mut lit, h) = (self.models.karts[n].clone(), self.time * 9.0 + n as f32);
-                for v in &mut lit.verts { for (i, l) in v.lit.iter_mut().enumerate() { *l *= 1.2 + 0.6 * (h + i as f32 * 2.1).sin(); } }
-                self.scene.push(&lit, &m);
-            } else {
-                self.scene.push(&self.models.karts[n], &m);
+            let (lift, head) = ((k.air / HOP * PI).sin().max(0.0) * 0.45, k.head + k.spin / 1.2 * 2.0 * TAU + k.drift * 0.25);
+            // The shadow falls away from the sun, and thins as the kart lifts.
+            let (sx, sz, r) = (k.x + 0.2 + lift * 0.5, k.z - 0.2 - lift * 0.5, 1.3 * size);
+            self.spots[n] = [sx, sz, head.sin(), head.cos(), 1.0 / (size * size), 0.6 * (1.0 - lift)];
+            for cz in (sz - r) as i32..=(sz + r) as i32 {
+                for cx in (sx - r) as i32..=(sx + r) as i32 { self.shade[((cz & 127) << 7 | (cx & 127)) as usize] |= 1 << n; }
             }
-            self.scene.push(&self.models.shadow, &M4::scale(size).then(&M4::translate(V3::new(k.x, 0.02, k.z))));
+            if !seen(k.x, k.z, 250.0) { continue; }
+            let at = V3::new(k.x, lift, k.z);
+            let far = if at.sub(cam.pos).len() > FINE { 1 } else { 0 };
+            let turn = M4::rotate_z(k.steer * 0.06 + k.drift * 0.08).then(&M4::rotate_y(head));
+            let place = M4::scale(size).then(&turn).then(&M4::translate(at));
+            let half = SUN.add(cam.pos.sub(at).norm()).norm();
+            // A star runs through the colours.
+            let h = self.time * 9.0 + n as f32;
+            let glow = if k.star > 0.0 { [0, 1, 2].map(|i| 1.2 + 0.6 * (h + i as f32 * 2.1).sin()) } else { [1.0; 3] };
+            let body = &mut self.models.karts[n][far];
+            body.light(&turn, half, sky, glow);
+            self.scene.push(&body.model, &place);
+            for (w, &[x, z, r, _]) in WHEELS.iter().enumerate() {
+                // The left wheels are the right ones turned about, and the front pair steers.
+                let (left, front) = (x < 0.0, w < 2);
+                let own = M4::rotate_x(if left { -k.roll / r } else { k.roll / r })
+                    .then(&M4::rotate_y(if left { PI } else { 0.0 } + if front { k.steer * 0.45 } else { 0.0 }));
+                let wheel = &mut self.models.wheels[far][w / 2];
+                wheel.light(&own.then(&turn), half, sky, glow);
+                self.scene.push(&wheel.model, &own.then(&M4::translate(V3::new(x, r, z))).then(&place));
+            }
         }
         for p in &self.fx {
             let age = p.age / p.life;
@@ -1222,12 +1440,18 @@ impl Kart {
         }
         // The ground is the "sky" under the horizon: each pixel's line of
         // sight is followed down to the flat ground and coloured there.
-        let (track, paint, time, eye) = (&self.track, &self.paint, self.time, cam.pos);
+        let (track, paint, time, eye, shade, spots) = (&self.track, &self.paint, self.time, cam.pos, &*self.shade, &self.spots);
         let (wide, thick) = (1.0 / (FOCAL * eye.y), 1.0 / th.fog);
         self.scene.render(f, &|d: V3| {
-            if d.y > -0.004 { return sky(th, paint, d); }
+            if d.y > -0.004 { return sky_at(th, paint, d); }
             let t = eye.y / -d.y;
-            let c = track.ground(th, paint, eye.x + d.x * t, eye.z + d.z * t, t * t * wide, time);
+            let (x, z) = (eye.x + d.x * t, eye.z + d.z * t);
+            let mut c = track.ground(th, paint, x, z, t * t * wide, time);
+            let near = shade[((z as i32 & 127) << 7 | (x as i32 & 127)) as usize];
+            if near != 0 {
+                let dark = shadow(spots, near, x, z);
+                if dark > 0.0 { c = mix(c, 0x06080c, dark); }
+            }
             mix(th.sky[1], c, fade(t * thick))
         });
         if self.flash > 0.0 { for p in &mut f.px { *p = blend(*p, 0xffffff, self.flash * 2.0); } }
