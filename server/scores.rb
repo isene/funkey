@@ -21,7 +21,7 @@
 
 require "digest"
 
-DIR = ENV["FUNKEY_SCORES"] || "/home/geir/funkey-scores"
+DIR = ENV["FUNKEY_SCORES"] || File.join(Dir.home, "funkey-scores")
 GAMES = %w[stack].freeze
 KEEP = 10
 WAIT = 15
