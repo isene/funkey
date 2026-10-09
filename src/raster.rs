@@ -493,6 +493,11 @@ struct STri { v: [SV; 3], mat: Mat, level: usize, mag: bool, y0: i32, y1: i32 }
 ///
 /// Each frame: [`begin`](Scene::begin) with the camera, [`push`](Scene::push)
 /// the models, then [`render`](Scene::render) into the frame with a sky.
+/// What stands behind the triangles: a colour for each line of sight, or
+/// a painter that fills a whole row of the frame.
+#[derive(Clone, Copy)]
+enum Back<'a> { Rays(&'a (dyn Fn(V3) -> Rgb + Sync)), Rows(&'a (dyn Fn(usize, &mut [Rgb]) + Sync)) }
+
 pub struct Scene {
     pub w: i32,
     pub h: i32,
@@ -613,11 +618,24 @@ impl Scene {
         }
     }
 
+    /// The camera's right, up and forward in the world. The line of sight
+    /// of the pixel middle (x, y) is `fwd * focal + right * (x - w/2) +
+    /// up * (h/2 - y)`, which is what `ray` returns at length one.
+    pub fn axes(&self) -> (V3, V3, V3) { (self.right, self.up, self.fwd) }
+
     /// Paint the frame: the sky through every pixel first, from the
     /// direction it looks along, then the triangles over it. The rows are
     /// split into bands, and each core takes the next band when it is
     /// done, so fast cores paint more of them than slow ones.
-    pub fn render(&mut self, f: &mut Frame, sky: &(dyn Fn(V3) -> Rgb + Sync)) {
+    pub fn render(&mut self, f: &mut Frame, sky: &(dyn Fn(V3) -> Rgb + Sync)) { self.show(f, Back::Rays(sky)); }
+
+    /// The same, with the background painted a row at a time: `rows(y,
+    /// px)` fills row `y` of the frame. A camera that does not roll sees
+    /// flat ground at one distance along each row, so a painter that
+    /// works from `axes` can step across a row with no division.
+    pub fn render_rows(&mut self, f: &mut Frame, rows: &(dyn Fn(usize, &mut [Rgb]) + Sync)) { self.show(f, Back::Rows(rows)); }
+
+    fn show(&mut self, f: &mut Frame, back: Back) {
         assert!(f.w == self.w && f.h == self.h, "the frame must be the scene's size");
         // The depth buffer steps out of the scene for the frame, so the
         // threads can hold the scene read-only and their own rows of it.
@@ -630,7 +648,7 @@ impl Scene {
             .map(|(i, (p, z))| (i * band, p, z));
         // One core, or a web page that cannot start threads: paint here.
         if threads == 1 {
-            for (y0, px, zb) in bands { self.paint(y0, px, zb, sky); }
+            for (y0, px, zb) in bands { self.paint(y0, px, zb, back); }
             self.zbuf = zbuf;
             return;
         }
@@ -641,21 +659,24 @@ impl Scene {
                 s.spawn(|| loop {
                     let b = next.lock().unwrap().next();
                     let Some((y0, px, zb)) = b else { break };
-                    me.paint(y0, px, zb, sky);
+                    me.paint(y0, px, zb, back);
                 });
             }
         });
         self.zbuf = zbuf;
     }
 
-    fn paint(&self, y0: usize, px: &mut [Rgb], zb: &mut [f32], sky: &(dyn Fn(V3) -> Rgb + Sync)) {
+    fn paint(&self, y0: usize, px: &mut [Rgb], zb: &mut [f32], back: Back) {
         let w = self.w as usize;
         let rows = px.len() / w;
-        for r in 0..rows {
-            let y = (y0 + r) as f32 + 0.5;
-            for x in 0..w {
-                px[r * w + x] = sky(self.ray(x as f32 + 0.5, y));
-            }
+        match back {
+            Back::Rays(sky) => for r in 0..rows {
+                let y = (y0 + r) as f32 + 0.5;
+                for x in 0..w {
+                    px[r * w + x] = sky(self.ray(x as f32 + 0.5, y));
+                }
+            },
+            Back::Rows(paint) => for (r, row) in px.chunks_mut(w).enumerate() { paint(y0 + r, row); },
         }
         let (by0, by1) = (y0 as i32, (y0 + rows) as i32 - 1);
         let fog = self.fog;
@@ -801,6 +822,28 @@ mod tests {
         assert_eq!(f.get(40, 40), 0x00ff00, "the hole shows the sky");
         assert_eq!(f.get(24, 40), 0xff0000, "bottom left is red again");
         assert_eq!(f.get(1, 1), 0x00ff00, "and the corner of the frame is sky");
+    }
+
+    #[test]
+    fn a_background_by_rows_is_the_one_by_rays() {
+        let cam = Cam3 { pos: V3::new(1.0, 2.0, 3.0), yaw: 0.7, pitch: -0.2, focal: 60.0 };
+        let sky = |d: V3| if d.y > 0.0 { 0x4080c0 } else { ((d.x * 9.0) as i32 & 1) as u32 * 0x303030 + 0x206020 };
+        let mut scene = Scene::new(64, 48);
+        scene.threads = 3;
+        let cube = Model::block(V3::new(-1.0, -1.0, -1.0), V3::new(1.0, 1.0, 1.0), Mat::Flat(0xff0000), 1.0, 99.0);
+        let (mut a, mut b) = (Frame::new(64, 48), Frame::new(64, 48));
+        scene.begin(&cam);
+        scene.push(&cube, &M4::translate(cam.pos.add(cam.forward().mul(6.0))));
+        scene.render(&mut a, &sky);
+        // The row painter builds each line of sight from the axes.
+        let (right, up, fwd) = scene.axes();
+        scene.render_rows(&mut b, &|y, px| {
+            for (x, p) in px.iter_mut().enumerate() {
+                *p = sky(fwd.mul(60.0).add(right.mul(x as f32 + 0.5 - 32.0)).add(up.mul(24.0 - (y as f32 + 0.5))).norm());
+            }
+        });
+        assert!(a.px == b.px, "the two backgrounds differ");
+        assert!(a.px.contains(&0x4080c0) && a.px.iter().any(|&p| p >> 16 > 0x80), "sky and cube are both in the picture");
     }
 
     #[test]

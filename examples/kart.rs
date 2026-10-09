@@ -26,7 +26,7 @@ const W: i32 = 640;
 const H: i32 = 400;
 const GAME: &str = "kart";
 /// The game's own version; the engine has its own.
-const VERSION: &str = "1.1";
+const VERSION: &str = "1.2";
 const FOCAL: f32 = W as f32 * 0.62;
 /// The world is this many metres a side, and as many cells.
 const SIZE: usize = 512;
@@ -79,8 +79,10 @@ fn bearing(x: f32, z: f32) -> f32 {
 /// A colour between two, counted in whole numbers. The ground and the
 /// sky ask for several at every pixel, where `blend` would take most of
 /// the frame.
-fn mix(a: Rgb, b: Rgb, t: f32) -> Rgb {
-    let w = ((t * 256.0) as u32).min(256);
+fn mix(a: Rgb, b: Rgb, t: f32) -> Rgb { mixw(a, b, ((t * 256.0) as u32).min(256)) }
+
+/// The same by a weight out of 256.
+fn mixw(a: Rgb, b: Rgb, w: u32) -> Rgb {
     let part = |mask: u32| (((a & mask) * (256 - w) + (b & mask) * w) >> 8) & mask;
     part(0xff00ff) | part(0x00ff00)
 }
@@ -237,10 +239,185 @@ fn shade(m: &mut Model) {
 }
 
 /// The pictures the scene paints with.
-struct Tex { puff: usize, check: usize, chest: usize, trees: [usize; 4] }
+struct Tex { puff: usize, check: usize, chest: usize, trees: [[usize; 2]; 4] }
 
-/// How wide a tree is to its height, by kind.
-const SLIM: [f32; 4] = [1.0, 1.0, 0.5, 0.5];
+/// How a tree's shadow is broken up: by leaves, by a palm's fronds, or not at all.
+#[derive(Clone, Copy, PartialEq)]
+enum Gaps { Leaves, Fronds, None }
+
+/// A kind of tree or rock: how wide it is to its height, and the least and the
+/// most it grows to in metres. Then its shadow: how high its leaves
+/// sit, how far they reach up and to the sides (all as parts of its
+/// height), how much light they stop, whether a trunk shows under
+/// them, and the gaps in it.
+struct Plant { slim: f32, grows: [f32; 2], high: f32, up: f32, out: f32, dark: f32, trunk: bool, gaps: Gaps }
+
+/// Two kinds of tree for each theme. The second is the rarer one.
+static PLANTS: [[Plant; 2]; 4] = [
+    [Plant { slim: 1.0, grows: [7.0, 11.0], high: 0.6, up: 0.32, out: 0.36, dark: 0.5, trunk: true, gaps: Gaps::Leaves },
+     Plant { slim: 0.5, grows: [7.5, 11.5], high: 0.64, up: 0.33, out: 0.2, dark: 0.4, trunk: true, gaps: Gaps::Leaves }],
+    [Plant { slim: 1.0, grows: [7.0, 11.0], high: 0.76, up: 0.14, out: 0.38, dark: 0.42, trunk: true, gaps: Gaps::Fronds },
+     Plant { slim: 1.0, grows: [5.5, 8.5], high: 0.76, up: 0.14, out: 0.38, dark: 0.42, trunk: true, gaps: Gaps::Fronds }],
+    [Plant { slim: 0.5, grows: [7.0, 12.0], high: 0.5, up: 0.48, out: 0.2, dark: 0.46, trunk: false, gaps: Gaps::None },
+     Plant { slim: 0.5, grows: [5.0, 8.5], high: 0.5, up: 0.48, out: 0.22, dark: 0.46, trunk: false, gaps: Gaps::None }],
+    [Plant { slim: 0.5, grows: [3.5, 6.5], high: 0.5, up: 0.48, out: 0.13, dark: 0.5, trunk: false, gaps: Gaps::None },
+     Plant { slim: 1.0, grows: [3.0, 6.5], high: 0.45, up: 0.45, out: 0.4, dark: 0.52, trunk: false, gaps: Gaps::None }],
+];
+
+/// A tree: where it stands, how tall it is, which of its theme's two
+/// kinds it is, and how much of each colour of light it has.
+struct Tree { at: V3, size: f32, kind: usize, lit: [f32; 3] }
+
+/// A number from 0 to 1 that is always the same for a spot.
+fn speck(x: u32, y: u32) -> f32 {
+    let h = (x.wrapping_mul(374761393) ^ y.wrapping_mul(668265263)).wrapping_add(0x9e3779b9);
+    let h = (h ^ h >> 13).wrapping_mul(1274126177);
+    ((h ^ h >> 16) & 255) as f32 / 255.0
+}
+
+/// How light a spot is on a heap of balls lit from the upper left, each
+/// with a middle and a radius and the later ones in front. None beside
+/// them all.
+fn heap(balls: &[(f32, f32, f32)], x: f32, y: f32) -> Option<f32> {
+    let mut light = None;
+    for &(cx, cy, r) in balls {
+        let (dx, dy) = ((x - cx) / r, (y - cy) / r);
+        let q = dx * dx + dy * dy;
+        if q < 1.0 { light = Some((0.5 - (dx * 0.5 + dy * 0.72) * 0.6 - q * q * 0.2).clamp(0.0, 1.0)); }
+    }
+    light
+}
+
+/// How far a spot is from a line between two points.
+fn off_line(x: f32, y: f32, a: (f32, f32), b: (f32, f32)) -> f32 {
+    let (ux, uy) = (b.0 - a.0, b.1 - a.1);
+    let t = (((x - a.0) * ux + (y - a.1) * uy) / (ux * ux + uy * uy)).clamp(0.0, 1.0);
+    (x - a.0 - ux * t).hypot(y - a.1 - uy * t)
+}
+
+/// A broad tree in leaf: a heap of leaves on a trunk that widens at the foot.
+fn oak() -> Texture {
+    const LEAVES: [(f32, f32, f32); 11] = [(64.0, 56.0, 30.0), (64.0, 26.0, 18.0), (48.0, 40.0, 22.0), (80.0, 38.0, 22.0), (30.0, 48.0, 14.0), (98.0, 48.0, 14.0),
+        (38.0, 64.0, 22.0), (90.0, 64.0, 22.0), (64.0, 52.0, 17.0), (54.0, 74.0, 18.0), (78.0, 76.0, 16.0)];
+    Texture::from_fn(128, 128, |x, y| {
+        let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+        if let Some(l) = heap(&LEAVES, fx, fy) { return blend(0x144c1c, 0x74c44c, (l + (speck(x / 2, y / 2) - 0.5) * 0.3).clamp(0.0, 1.0)); }
+        let (dx, wide) = (fx - 64.0, 5.0 + ((fy - 104.0).max(0.0) / 24.0).powi(2) * 7.0);
+        if fy > 70.0 && dx.abs() < wide { blend(0x946840, 0x44280f, (dx / wide * 0.5 + 0.5 + (speck(x / 2, y / 6) - 0.5) * 0.35).clamp(0.0, 1.0)) } else { CUTOUT }
+    })
+}
+
+/// A birch: a white trunk with dark marks, and light leaves with gaps between them.
+fn birch() -> Texture {
+    const LEAVES: [(f32, f32, f32); 10] = [(32.0, 36.0, 17.0), (32.0, 11.0, 9.0), (24.0, 23.0, 11.0), (41.0, 21.0, 11.0), (20.0, 48.0, 12.0), (44.0, 50.0, 12.0),
+        (32.0, 46.0, 11.0), (18.0, 66.0, 8.0), (46.0, 68.0, 8.0), (32.0, 60.0, 13.0)];
+    Texture::from_fn(64, 128, |x, y| {
+        let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+        if let Some(l) = heap(&LEAVES, fx, fy) {
+            if speck(x / 2, y / 2) > 0.16 - l * 0.1 { return blend(0x2c6c20, 0xbce468, (l + (speck(x, y) - 0.5) * 0.3).clamp(0.0, 1.0)); }
+        }
+        let (dx, wide) = (fx - 32.0, 2.6 + (fy - 30.0).max(0.0) / 98.0 * 1.8);
+        if fy < 30.0 || dx.abs() >= wide { CUTOUT }
+        else if speck(x / 3, y / 2) < 0.2 { 0x2c2c2c }
+        else { blend(0xf4f4ec, 0x98a0a8, dx / wide * 0.5 + 0.5) }
+    })
+}
+
+/// A palm that leans to one side, with fronds that go out at these
+/// angles and hang by their own weight.
+fn palm(lean: f32, fronds: &[(f32, f32)]) -> Texture {
+    let top = (64.0 + lean * 20.0, 36.0);
+    Texture::from_fn(128, 128, move |x, y| {
+        let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+        // The nuts under the fronds.
+        for (n, (ox, oy)) in [(-5.0f32, 5.0f32), (4.0, 6.0), (0.0, 2.0)].into_iter().enumerate() {
+            let r = (fx - top.0 - ox).hypot(fy - top.1 - oy);
+            if n < 2 && r < 4.0 { return blend(0x7c5428, 0x3c240c, r / 4.0); }
+        }
+        // A spot is on a frond when it is close to its rib: closer above
+        // it than below, where the leaves hang in strips.
+        let mut leaf: Option<f32> = None;
+        for &(a, len) in fronds {
+            let (ca, sa) = (a.cos(), a.sin());
+            let (mut best, mut at, mut under) = (f32::MAX, 0.0f32, false);
+            for n in 0..=32 {
+                let t = n as f32 / 32.0;
+                let (px, py) = (top.0 + ca * len * t, top.1 - sa * len * t + 0.011 * len * len * t * t);
+                let d = (fx - px).hypot(fy - py);
+                if d < best { (best, at, under) = (d, t, fy > py); }
+            }
+            let full = (at * PI).sin().powf(0.6);
+            let reach = if under { 2.0 + 9.0 * full } else { 1.5 + 2.5 * full };
+            if best < reach && (best < 1.8 || !under || (at * 19.0).fract() < 0.72) {
+                let l = if best < 1.4 { 0.95 } else if under { 0.55 - best / reach * 0.45 } else { 0.8 };
+                leaf = Some(leaf.map_or(l, |was: f32| was.max(l)));
+            }
+        }
+        if let Some(l) = leaf { return blend(0x14582c, 0x94d858, (l + (speck(x, y) - 0.5) * 0.16).clamp(0.0, 1.0)); }
+        // The trunk bends on its way down, and has rings.
+        let u = (fy - top.1) / (128.0 - top.1);
+        let (mid, wide) = (top.0 - lean * 30.0 * u + lean * 9.0 * (u * PI).sin(), 2.8 + 2.4 * u);
+        let dx = fx - mid;
+        if u < 0.0 || dx.abs() >= wide { return CUTOUT; }
+        let ring = if (y / 5) % 2 == 0 { 0.0 } else { 0.16 };
+        blend(0xb08850, 0x5c3c1c, (dx / wide * 0.5 + 0.5 + ring).clamp(0.0, 1.0))
+    })
+}
+
+/// A fir in tiers, each with this much of it under snow.
+fn fir(tiers: usize, snow: f32) -> Texture {
+    Texture::from_fn(64, 128, move |x, y| {
+        let (dx, fy) = (x as f32 + 0.5 - 32.0, y as f32 + 0.5);
+        let each = 108.0 / tiers as f32;
+        for tier in 0..tiers {
+            let (top, wide) = (4.0 + tier as f32 * each * 0.86, 9.0 + (tier + 1) as f32 * 21.0 / tiers as f32);
+            let foot = top + each * 1.5 - 3.5 * (dx * 0.55).sin().abs();
+            let part = (fy - top) / (each * 1.5);
+            let edge = part * wide;
+            if fy < top || fy >= foot || dx.abs() >= edge { continue; }
+            let side = dx / wide * 0.5 + 0.5;
+            // The snow lies deepest out on the boughs.
+            return if part < snow * (0.3 + 0.7 * dx.abs() / edge.max(1.0)) { blend(0xffffff, 0xb4c8e8, (side * 1.5 - 0.3).clamp(0.0, 1.0)) }
+                else { blend(0x30804a, 0x0c3020, (side + (speck(x, y / 2) - 0.5) * 0.3 + (part - 0.7).max(0.0)).clamp(0.0, 1.0)) };
+        }
+        if fy >= 112.0 && dx.abs() < 3.0 { blend(0x7c5430, 0x402810, dx / 6.0 + 0.5) } else { CUTOUT }
+    })
+}
+
+/// A cactus: a ribbed stem with two arms.
+fn cactus() -> Texture {
+    const LIMBS: [((f32, f32), (f32, f32), f32); 5] = [((32.0, 18.0), (32.0, 130.0), 7.5), ((25.0, 78.0), (13.0, 78.0), 5.0), ((13.0, 78.0), (13.0, 48.0), 5.0),
+        ((39.0, 62.0), (51.0, 62.0), 5.0), ((51.0, 62.0), (51.0, 32.0), 5.0)];
+    Texture::from_fn(64, 128, |x, y| {
+        let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+        if (fx - 30.0).hypot(fy - 10.5) < 2.2 || (fx - 51.0).hypot(fy - 26.5) < 1.8 { return 0xf8a8c8; }
+        for &(a, b, r) in &LIMBS {
+            if off_line(fx, fy, a, b) >= r { continue; }
+            // Across a limb that stands, the light falls from the left; on one that lies, from above.
+            let across = if a.0 == b.0 { (fx - a.0) / r } else { (fy - a.1) / r };
+            let rib = if ((across + 1.0) * 2.5).fract() < 0.2 { 0.22 } else { 0.0 };
+            return blend(0x7cc468, 0x1c4c28, (across * 0.45 + 0.45 + rib).clamp(0.0, 1.0));
+        }
+        CUTOUT
+    })
+}
+
+/// A pillar of red rock in layers, wider at the foot.
+fn rock() -> Texture {
+    Texture::from_fn(128, 128, |x, y| {
+        let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+        // The layers are of uneven height, and sag a little to one side.
+        let layer = ((fy + fx * 0.06 + 3.0 * (fx * 0.11).sin()) / 13.0) as u32;
+        let down = (fy - 16.0) / 112.0;
+        let wide = 20.0 + 14.0 * down + if fy > 58.0 { 8.0 } else { 0.0 } + if fy > 98.0 { 10.0 } else { 0.0 } + speck(7, layer) * 6.0 + 2.0 * (fy * 0.5).sin();
+        let dx = fx - 64.0 - 5.0 * (fy * 0.04).sin();
+        if down < 0.0 || dx.abs() >= wide { return CUTOUT; }
+        let stone = [0xc06838, 0xb05c34, 0xd08048, 0xa4502c][(speck(3, layer) * 3.99) as usize];
+        let side = dx / wide * 0.5 + 0.5;
+        let crack = if speck(x / 2, 0) < 0.06 && speck(x / 2, layer) < 0.5 { 0.2 } else { 0.0 };
+        blend(blend(stone, 0xfff0d0, (0.32 - side).max(0.0)), 0x30141c, (side * 0.8 - 0.18 + crack + (speck(x / 2, y / 2) - 0.5) * 0.12).clamp(0.0, 0.85))
+    })
+}
 
 fn textures(scene: &mut Scene) -> Tex {
     let puff = scene.texture(Texture::from_fn(16, 16, |x, y| {
@@ -254,39 +431,52 @@ fn textures(scene: &mut Scene) -> Tex {
         let (u, v) = (((x + 16) % 32) as i32 - 16, ((y + 16) % 32) as i32 - 16);
         if u.abs().max(v.abs()) >= 13 { 0x8c4c10 } else if u.abs() + v.abs() < 8 { 0xffffff } else { blend(0xffd040, 0xf06020, (u + v + 26) as f32 / 52.0) }
     }));
-    let leaf = scene.texture(Texture::from_fn(64, 64, |x, y| {
-        let (dx, dy) = (x as f32 - 31.5, y as f32 - 24.0);
-        if dx.hypot(dy) < 21.0 + 2.5 * (dy.atan2(dx) * 7.0).sin() { blend(0x1c6420, 0x5cb444, ((-dx - dy) / 44.0 + 0.5).clamp(0.0, 1.0)) }
-        else if (x as i32 - 32).abs() < 4 && y > 38 { if x < 32 { 0x6c4424 } else { 0x503018 } }
-        else { CUTOUT }
-    }));
-    let palm = scene.texture(Texture::from_fn(64, 64, |x, y| {
-        let (fx, fy) = (x as f32, y as f32);
-        let (dx, dy) = (fx - 32.0, fy - 18.0);
-        let r = dx.hypot(dy);
-        if r < 4.0 || (r < 27.0 && (dy.atan2(dx) * 3.5 + 0.4).sin().abs() > 0.5 + r / 60.0 && dy < 15.0) {
-            return blend(0x1c7830, 0x74c44c, (0.6 - dy / 40.0).clamp(0.0, 1.0));
-        }
-        let mid = 32.0 + 5.0 * ((fy - 18.0) / 46.0 * 2.2).sin();
-        if fy > 18.0 && (fx - mid).abs() < 2.5 { if (y / 4) % 2 == 0 { 0x8c6434 } else { 0x74502c } } else { CUTOUT }
-    }));
-    let pine = scene.texture(Texture::from_fn(32, 64, |x, y| {
-        let (dx, fy) = ((x as f32 - 15.5).abs(), y as f32);
-        for tier in 0..3 {
-            let (top, foot, wide) = (4.0 + tier as f32 * 14.0, 24.0 + tier as f32 * 15.0, 8.0 + tier as f32 * 3.5);
-            if fy >= top && fy < foot && dx < (fy - top) / (foot - top) * wide {
-                return if fy - top < 4.0 + dx * 0.5 { 0xf4f8ff } else { blend(0x144c2c, 0x2c7c44, x as f32 / 32.0) };
+    let trees = [
+        [scene.texture(oak()), scene.texture(birch())],
+        [scene.texture(palm(0.6, &[(0.1, 50.0), (0.62, 52.0), (1.15, 46.0), (1.75, 44.0), (2.3, 50.0), (2.85, 52.0), (3.4, 44.0), (-0.4, 42.0)])),
+         scene.texture(palm(-0.5, &[(0.25, 46.0), (0.8, 50.0), (1.4, 44.0), (2.0, 46.0), (2.6, 52.0), (3.15, 48.0), (3.65, 40.0), (-0.3, 40.0)]))],
+        [scene.texture(fir(5, 0.42)), scene.texture(fir(4, 0.8))],
+        [scene.texture(cactus()), scene.texture(rock())],
+    ];
+    Tex { puff, check, chest, trees }
+}
+
+/// What the ground shows besides the road's own lines, for every half
+/// metre of the world: how far between a surface's two colours it is
+/// (the low byte) and how deep in shadow (the high byte). `mid` and
+/// `far` are the same for every two metres and every eight, for ground
+/// far off. Worked out once for a track, so the patches of colour, the
+/// dark line the karts drive and every shadow cost one look a pixel.
+/// `grit` is the grain of the ground right in front of the camera.
+struct Wear { fine: Box<[u16; 1 << 20]>, mid: Box<[u16; 1 << 16]>, far: Box<[u16; 1 << 12]>, grit: [u8; 4096] }
+
+/// The colour of ground in shadow.
+const SHADE: Rgb = 0x0a0e1c;
+
+/// How far a shadow falls on the ground for each metre its caster is
+/// tall: the long shadows of a low sun.
+const FALL: f32 = 1.8;
+
+impl Wear {
+    /// The two bytes at a spot, each out of 256. `level` grows with how
+    /// much ground a pixel covers: 0 blends the four spots round it.
+    #[inline(always)]
+    fn at(&self, level: u32, x: f32, z: f32) -> (u32, u32) {
+        let wide = |v: u16| (v as u32 & 0xff) | (v as u32 & 0xff00) << 8;
+        let v = match level {
+            0 => {
+                let (fx, fz) = ((x * 512.0) as i32 - 128, (z * 512.0) as i32 - 128);
+                let (ix, iz, tx, tz) = (fx >> 8, fz >> 8, (fx & 255) as u32, (fz & 255) as u32);
+                let g = |a: i32, b: i32| wide(self.fine[(((b & 1023) << 10) | (a & 1023)) as usize]);
+                let (top, bot) = (g(ix, iz) * (256 - tx) + g(ix + 1, iz) * tx, g(ix, iz + 1) * (256 - tx) + g(ix + 1, iz + 1) * tx);
+                (((top >> 8) & 0xff00ff) * (256 - tz) + ((bot >> 8) & 0xff00ff) * tz) >> 8
             }
-        }
-        if fy >= 54.0 && dx < 2.5 { 0x5c3c20 } else { CUTOUT }
-    }));
-    let cactus = scene.texture(Texture::from_fn(32, 64, |x, y| {
-        let (x, y) = (x as i32, y as i32);
-        let body = ((x - 16).abs() < 4 && y > 8) || ((6..=12).contains(&x) && (34..40).contains(&y)) || ((5..9).contains(&x) && (22..40).contains(&y))
-            || ((20..=26).contains(&x) && (26..32).contains(&y)) || ((23..27).contains(&x) && (14..32).contains(&y));
-        if !body { CUTOUT } else if x % 3 == 0 { 0x2c6c30 } else { 0x48984c }
-    }));
-    Tex { puff, check, chest, trees: [leaf, palm, pine, cactus] }
+            1 => wide(self.fine[((((z * 2.0) as i32 & 1023) << 10) | ((x * 2.0) as i32 & 1023)) as usize]),
+            2 => wide(self.mid[((((z * 0.5) as i32 & 255) << 8) | ((x * 0.5) as i32 & 255)) as usize]),
+            _ => wide(self.far[((((z * 0.125) as i32 & 63) << 6) | ((x * 0.125) as i32 & 63)) as usize]),
+        };
+        (v & 0xff, v >> 16 & 0xff)
+    }
 }
 
 /// A track as it is driven and drawn.
@@ -306,7 +496,8 @@ struct Track {
     /// How far from the middle the barrier stands.
     limit: f32,
     walls: Vec<Model>,
-    trees: Vec<(V3, f32)>,
+    wear: Wear,
+    trees: Vec<Tree>,
     crates: Vec<[f32; 2]>,
     /// Where each push pad begins along the lap, and its middle.
     pads: Vec<(f32, f32)>,
@@ -384,20 +575,136 @@ impl Track {
         let (lo_z, hi_z) = pts.iter().fold((f32::MAX, f32::MIN), |(a, b), p| (a.min(p[1]), b.max(p[1])));
         let k = MAP.2 / (hi_x - lo_x).max(hi_z - lo_z);
         let chart = (lo_x - (MAP.2 / k - (hi_x - lo_x)) / 2.0, hi_z + (MAP.2 / k - (hi_z - lo_z)) / 2.0, k);
-        let mut t = Track { plan, pts, dir, curv, near, step, len, half: plan.half, limit, walls, trees: Vec::new(), crates, pads, dots: Vec::new(), chart };
+        let none = || vec![0u16; 1 << 20].into_boxed_slice();
+        let wear = Wear { fine: none().try_into().unwrap(), mid: none()[..1 << 16].to_vec().into_boxed_slice().try_into().unwrap(), far: none()[..1 << 12].to_vec().into_boxed_slice().try_into().unwrap(), grit: [0; 4096] };
+        let mut t = Track { plan, pts, dir, curv, near, step, len, half: plan.half, limit, walls, wear, trees: Vec::new(), crates, pads, dots: Vec::new(), chart };
         t.dots = (0..n).step_by(3).map(|i| t.dot(t.pts[i][0], t.pts[i][1])).collect();
-        // Trees beyond the barrier, never where another stretch of road runs.
+        // Trees beyond the barrier, never where another stretch of road
+        // runs: a row close by, and a thinner one behind it.
         let mut rng = Rng::new(plan.theme as u64 * 77 + 5);
         let mut i = 0;
         while i < n {
-            for side in [-1.0f32, 1.0] {
-                let p = t.off(i, side * (limit + rng.range(2.5, 14.0)));
+            for (side, lo, hi, often) in [(-1.0f32, 1.4, 10.0, 0.8), (1.0, 1.4, 10.0, 0.8), (-1.0, 14.0, 46.0, 0.45), (1.0, 14.0, 46.0, 0.45)] {
+                let p = t.off(i, side * (limit + rng.range(lo, hi)));
                 let clear = t.at(p.x, p.z).map(|(lat, _, _)| lat.abs() > limit + 1.5).unwrap_or(true);
-                if clear && rng.chance(0.8) { t.trees.push((p, rng.range(4.5, 8.0))); }
+                let kind = rng.chance(0.3) as usize;
+                let (grows, light, warm) = (PLANTS[plan.theme][kind].grows, rng.range(0.8, 1.08), rng.range(-0.05, 0.05));
+                let tree = Tree { at: p, size: rng.range(grows[0], grows[1]), kind, lit: [light * (1.0 + warm), light, light * (1.0 - warm)] };
+                if clear && rng.chance(often) { t.trees.push(tree); }
             }
             i += rng.range(5.0, 11.0) as usize;
         }
+        t.bake(post);
         t
+    }
+
+    /// Work out the wear: patches of colour, the dark line the karts
+    /// drive, and the shadows of the barrier, the arch and the trees.
+    fn bake(&mut self, post: f32) {
+        const N: usize = SIZE * 2;
+        let paint = Paint::new();
+        let spot = |i: usize, j: usize| ((i as f32 + 0.5) * 0.5, (j as f32 + 0.5) * 0.5);
+        // The way along the ground from the sun.
+        let flat = SUN.x.hypot(SUN.z);
+        let away = [-SUN.x / flat, -SUN.z / flat];
+        let (mut tone, mut dim, mut shadow) = (vec![0.0f32; N * N], vec![0.0f32; N * N], vec![0.0f32; N * N]);
+        for j in 0..N {
+            for i in 0..N {
+                let ((x, z), k) = (spot(i, j), j * N + i);
+                let (big, small) = (paint.at(x * 0.13, z * 0.13), paint.at(x * 0.9, z * 0.9));
+                let by = self.at(x, z);
+                let a = by.map(|(lat, _, _)| lat.abs()).unwrap_or(f32::MAX);
+                if a > self.limit { tone[k] = big * 0.6 + paint.at(x * 0.45, z * 0.45) * 0.4; }
+                else if a > self.half { tone[k] = big * 0.6 + small * 0.4; }
+                else if let Some((lat, s, at)) = by {
+                    tone[k] = small * 0.7 + paint.at(x * 0.07, z * 0.07) * 0.3;
+                    // Rubber where the karts drive, on the inside of a bend, and dark patches.
+                    let line = (self.curv[at] * 170.0).clamp(2.6 - self.half, self.half - 2.6);
+                    let d = (lat - line).abs() * (1.0 / 2.6);
+                    dim[k] = 0.2 * (1.0 - d * d).max(0.0) + 0.3 * (paint.at(x * 0.06 + 9.0, z * 0.06 + 3.0) - 0.56).max(0.0);
+                    // A stain where each kart stands at the start.
+                    let back = self.len - 5.0 - s;
+                    if back > -1.5 && back < 33.0 {
+                        let slot = ((back + 2.25) / 4.5) as usize;
+                        let (u, v) = (back - slot as f32 * 4.5, lat - if slot % 2 == 0 { -2.6 } else { 2.6 });
+                        dim[k] += 0.2 * (1.0 - (u * u + v * v) * 0.8).max(0.0);
+                    }
+                }
+                // The barrier is 0.8 metres tall: a spot is in its shadow
+                // when the way to the sun crosses it within that reach.
+                if (a - self.limit).abs() < 1.5 {
+                    let cross = (1..=6).find(|&n| {
+                        let d = n as f32 * 0.2;
+                        let b = self.at(x - away[0] * d, z - away[1] * d).map(|(lat, _, _)| lat.abs()).unwrap_or(f32::MAX);
+                        (b > self.limit) != (a > self.limit)
+                    });
+                    if let Some(n) = cross { shadow[k] = 0.44 * (1.0 - (n - 1) as f32 / 7.0); }
+                }
+            }
+        }
+        // A soft dark oval that lies away from the sun: its middle, half
+        // its length and its width, how dark it is and the gaps in it.
+        let mut oval = |c: [f32; 2], long: f32, wide: f32, dark: f32, gaps: Gaps| {
+            let r = long.max(wide) + 0.5;
+            for j in (((c[1] - r) * 2.0) as i32).max(0)..=(((c[1] + r) * 2.0) as i32).min(N as i32 - 1) {
+                for i in (((c[0] - r) * 2.0) as i32).max(0)..=(((c[0] + r) * 2.0) as i32).min(N as i32 - 1) {
+                    let (x, z) = spot(i as usize, j as usize);
+                    let (dx, dz) = (x - c[0], z - c[1]);
+                    let (u, v) = ((dx * away[0] + dz * away[1]) / long, (dx * away[1] - dz * away[0]) / wide);
+                    let q = u * u + v * v;
+                    if q >= 1.0 { continue; }
+                    let part = match gaps {
+                        Gaps::Leaves => (0.5 + paint.at(x * 0.7 + 5.0, z * 0.7) * 1.1).min(1.0),
+                        Gaps::Fronds => (0.3 + (v.atan2(u) * 4.0).sin().abs() * 1.4 + (0.4 - q).max(0.0) * 2.0).min(1.0),
+                        Gaps::None => 1.0,
+                    };
+                    let k = j as usize * N + i as usize;
+                    shadow[k] = shadow[k].max(dark * part * (1.0 - q * q * q));
+                }
+            }
+        };
+        for tree in &self.trees {
+            let kind = &PLANTS[self.plan.theme][tree.kind];
+            let (p, far) = (tree.at, tree.size * kind.high * FALL);
+            let (wide, tall) = (tree.size * kind.out, tree.size * kind.up * FALL);
+            oval([p.x + away[0] * far, p.z + away[1] * far], wide.hypot(tall), wide, kind.dark, kind.gaps);
+            // The trunk, from the foot to the leaves.
+            if kind.trunk { oval([p.x + away[0] * far * 0.5, p.z + away[1] * far * 0.5], far * 0.5, 0.5, kind.dark * 0.9, Gaps::None); }
+        }
+        // The arch: two posts and a beam from 4.4 to 5.8 metres up. A
+        // spot is in its shadow when the way to the sun meets one.
+        let (o, d) = (self.pts[0], self.dir[0]);
+        let (across, down) = ([d[1], -d[0]], [away[0] * FALL, away[1] * FALL]);
+        let det = across[0] * down[1] - across[1] * down[0];
+        if det.abs() > 0.05 {
+            for j in (((o[1] - 36.0) * 2.0) as i32).max(0)..(((o[1] + 36.0) * 2.0) as i32).min(N as i32) {
+                for i in (((o[0] - 36.0) * 2.0) as i32).max(0)..(((o[0] + 36.0) * 2.0) as i32).min(N as i32) {
+                    let (x, z) = spot(i as usize, j as usize);
+                    // The spot is `u` metres along the beam and under a point `h` metres up.
+                    let (dx, dz) = (x - o[0], z - o[1]);
+                    let (u, h) = ((dx * down[1] - dz * down[0]) / det, (across[0] * dz - across[1] * dx) / det);
+                    let soft = |v: f32, lo: f32, hi: f32| ((v - lo).min(hi - v) * 2.5 + 0.5).clamp(0.0, 1.0);
+                    let beam = soft(u, -post, post) * soft(h, 4.4, 5.8);
+                    let posts = soft(u.abs(), post - 0.4, post + 0.4) * soft(h, 0.0, 5.8);
+                    let k = j as usize * N + i as usize;
+                    shadow[k] = shadow[k].max(0.5 * beam.max(posts));
+                }
+            }
+        }
+        let pack = |t: f32, d: f32| ((t * 255.0) as u16).min(255) | ((d * 255.0) as u16).min(255) << 8;
+        for k in 0..N * N { self.wear.fine[k] = pack(tone[k], 1.0 - (1.0 - dim[k].min(1.0)) * (1.0 - shadow[k])); }
+        // The coarser two are means of the fine one.
+        let mean = |i: usize, j: usize, n: usize| {
+            let (mut t, mut d) = (0u32, 0u32);
+            for b in 0..n { for a in 0..n { let v = self.wear.fine[(j * n + b) * N + i * n + a] as u32; t += v & 0xff; d += v >> 8; } }
+            (t / (n * n) as u32) as u16 | ((d / (n * n) as u32) as u16) << 8
+        };
+        let mid: Vec<u16> = (0..1 << 16).map(|k| mean(k & 255, k >> 8, 4)).collect();
+        let far: Vec<u16> = (0..1 << 12).map(|k| mean(k & 63, k >> 6, 16)).collect();
+        self.wear.mid.copy_from_slice(&mid);
+        self.wear.far.copy_from_slice(&far);
+        let mut rng = Rng::new(11);
+        for g in &mut self.wear.grit { *g = rng.below(33) as u8; }
     }
 
     /// The spot on the ground `lat` metres right of the middle at a point.
@@ -421,32 +728,73 @@ impl Track {
         (MAP.0 + ((x - self.chart.0) * self.chart.2) as i32, MAP.1 + ((self.chart.1 - z) * self.chart.2) as i32)
     }
 
-    /// The colour of the ground at a spot. One pixel covers `far` metres
-    /// there, so a pattern finer than that is painted as its average.
-    fn ground(&self, th: &Theme, paint: &Paint, x: f32, z: f32, far: f32, time: f32) -> Rgb {
-        let land = || mix(th.land[0], th.land[1], paint.at(x * 0.13, z * 0.13));
-        let Some((lat, s, _)) = self.at(x, z) else { return land() };
-        let a = lat.abs();
-        if a > self.limit { return land(); }
-        if a > self.half + KERB {
-            let band = mixf(((s * (1.0 / 6.0)) as i32 & 1) as f32, 0.5, blur(far, 6.0));
-            let fine = mixf(paint.at(x * 0.9, z * 0.9), 0.5, blur(far, 1.2));
-            return mix(th.verge[0], th.verge[1], band * 0.5 + paint.at(x * 0.13, z * 0.13) * 0.3 + fine * 0.2);
+    /// Paint a row of the ground. Its first pixel looks at the spot `from`
+    /// and each next one a `step` further on. One pixel covers `far`
+    /// metres of ground, so a pattern finer than that is painted as its
+    /// average, and `haze` of every colour is lost to the air.
+    #[allow(clippy::too_many_arguments)]
+    fn row(&self, th: &Theme, px: &mut [Rgb], from: (f32, f32), step: (f32, f32), far: f32, haze: f32, time: f32, shade: &[u8; 16384], spots: &[[f32; 6]; KARTS]) {
+        let pair = |c: [Rgb; 2], period: f32| { let b = blur(far, period) * 0.5; [mix(c[0], c[1], b), mix(c[0], c[1], 1.0 - b)] };
+        let (kerb, check, pad) = (pair(th.kerb, 2.0), pair([0x181818, 0xf8f8f8], 0.8), pair([0xf05010, 0xfff040], 1.6));
+        // The mown stripes of the verge give half of its colour.
+        let band = { let b = (blur(far, 6.0) * 64.0) as u32; [b, 128 - b] };
+        let (dashes, haze) = (far < 2.0, ((haze * 256.0) as u32).min(256));
+        let level = if far < 0.35 { 0 } else if far < 1.4 { 1 } else if far < 5.0 { 2 } else { 3 };
+        // The grain shows where a pixel is smaller than a grain, and the
+        // boxes the karts start in while their lines are a pixel thick.
+        let (grain, boxes) = ((((0.2 - far) * (256.0 / 0.2)) as i32).clamp(0, 200) as u32, far < 1.0);
+        let (mut x, mut z) = from;
+        for p in px.iter_mut() {
+            let (xi, zi) = (x as i32, z as i32);
+            let (tone, mut dim) = self.wear.at(level, x, z);
+            let i = if (xi as u32) < SIZE as u32 && (zi as u32) < SIZE as u32 { self.near[zi as usize * SIZE + xi as usize] } else { NONE };
+            let mut plain = true;
+            let mut c = if i == NONE { mixw(th.land[0], th.land[1], tone) } else {
+                let (q, d) = (self.pts[i as usize], self.dir[i as usize]);
+                let (ux, uz) = (x - q[0], z - q[1]);
+                let (lat, s) = (ux * d[1] - uz * d[0], i as f32 * self.step + ux * d[0] + uz * d[1]);
+                let s = if s < 0.0 { s + self.len } else if s >= self.len { s - self.len } else { s };
+                let a = lat.abs();
+                if a > self.limit { mixw(th.land[0], th.land[1], tone) }
+                else if a > self.half + KERB { mixw(th.verge[0], th.verge[1], band[((s * (1.0 / 6.0)) as i32 & 1) as usize] + tone / 2) }
+                else if a > self.half { plain = false; kerb[((s * 0.5) as i32 & 1) as usize] }
+                else if s < 1.6 { plain = false; check[(((s * 1.25) as i32 + ((lat + 64.0) * 1.25) as i32) & 1) as usize] }
+                else if let Some(k) = self.pad(s, lat, time) { plain = false; pad[k] }
+                else {
+                    let c = mixw(th.road[0], th.road[1], tone);
+                    if a > self.half - 0.3 || (dashes && a < 0.14 && (s * (1.0 / 3.0)) as i32 & 1 == 0) || (boxes && self.start_box(s, lat)) { mixw(c, th.line, 218) } else { c }
+                }
+            };
+            if grain > 0 && plain {
+                let g = self.wear.grit[((((z * 16.0) as i32 & 63) << 6) | ((x * 16.0) as i32 & 63)) as usize] as u32;
+                c = if g < 16 { mixw(c, 0x000000, (16 - g) * grain >> 8) } else { mixw(c, 0xffffff, (g - 16) * grain >> 9) };
+            }
+            let near = shade[((zi & 127) << 7 | (xi & 127)) as usize];
+            if near != 0 { dim = 256 - (((256 - dim) as f32) * (1.0 - shadow(spots, near, x, z))) as u32; }
+            if dim > 0 { c = mixw(c, SHADE, dim); }
+            *p = if haze > 0 { mixw(c, th.sky[1], haze) } else { c };
+            x += step.0;
+            z += step.1;
         }
-        if a > self.half { return mix(th.kerb[0], th.kerb[1], mixf(((s * 0.5) as i32 & 1) as f32, 0.5, blur(far, 2.0))); }
-        if s < 1.6 {
-            let k = (((s * 1.25) as i32 + ((lat + 64.0) * 1.25) as i32) & 1) as f32;
-            return mix(0x181818, 0xf8f8f8, mixf(k, 0.5, blur(far, 0.8)));
-        }
+    }
+
+    /// Whether a spot of the road is on the painted box a kart starts
+    /// in: a line in front of it and a short one on each side.
+    fn start_box(&self, s: f32, lat: f32) -> bool {
+        let back = self.len - 3.4 - s;
+        if !(0.0..36.0).contains(&back) { return false; }
+        let slot = (back * (1.0 / 4.5)) as i32;
+        let (u, v) = (back - slot as f32 * 4.5, (lat - if slot & 1 == 0 { -2.6 } else { 2.6 }).abs());
+        slot < KARTS as i32 && v < 1.35 && (u < 0.2 || (v > 1.15 && u < 1.5))
+    }
+
+    /// Which of a push pad's two colours a spot of the road has, if it is on one.
+    fn pad(&self, s: f32, lat: f32, time: f32) -> Option<usize> {
         for &(from, mid) in &self.pads {
             let (w, u) = (if s < from { s - from + self.len } else { s - from }, (lat - mid).abs());
-            if w < 7.0 && u < 1.8 {
-                let k = ((w + u * 0.9) / 1.6 - time * 3.0).rem_euclid(1.0);
-                return mix(0xf05010, 0xfff040, mixf(if k < 0.5 { 1.0 } else { 0.0 }, 0.5, blur(far, 1.6)));
-            }
+            if w < 7.0 && u < 1.8 { return Some((((w + u * 0.9) / 1.6 - time * 3.0).rem_euclid(1.0) < 0.5) as usize); }
         }
-        let c = mix(th.road[0], th.road[1], mixf(paint.at(x * 0.9, z * 0.9), 0.5, blur(far, 1.2)));
-        if a > self.half - 0.3 || (a < 0.14 && (s * (1.0 / 3.0)) as i32 & 1 == 0 && far < 2.0) { mix(c, th.line, 0.85) } else { c }
+        None
     }
 }
 
@@ -1382,8 +1730,8 @@ impl Kart {
         let seen = |x: f32, z: f32, far: f32| { let d = (x - cam.pos.x) * sn + (z - cam.pos.z) * cs; d > -3.0 && d < far };
         self.scene.begin(cam);
         for m in &self.track.walls { if seen(m.centre.x, m.centre.z, 320.0) { self.scene.push(m, &M4::identity()); } }
-        for &(p, size) in &self.track.trees {
-            if seen(p.x, p.z, 280.0) { self.scene.billboard(p, size * SLIM[th.tree], size, Mat::Tex(self.tex.trees[th.tree]), [1.0; 3]); }
+        for t in &self.track.trees {
+            if seen(t.at.x, t.at.z, 280.0) { self.scene.billboard(t.at, t.size * PLANTS[th.tree][t.kind].slim, t.size, Mat::Tex(self.tex.trees[th.tree][t.kind]), t.lit); }
         }
         for (i, p) in self.track.crates.iter().enumerate() {
             if self.crates[i] > 0.0 || !seen(p[0], p[1], 200.0) { continue; }
@@ -1438,21 +1786,21 @@ impl Kart {
             let tint = if p.hot { [2.4, 2.2 - 1.8 * age, 1.2 - 1.1 * age] } else { p.tint };
             self.scene.billboard(p.p, p.size * (1.0 - age * 0.7), p.size * (1.0 - age * 0.7), Mat::Tex(self.tex.puff), tint);
         }
-        // The ground is the "sky" under the horizon: each pixel's line of
-        // sight is followed down to the flat ground and coloured there.
+        // Behind the models: the sky, and under the horizon the flat
+        // ground. The camera does not roll, so a row of pixels looks at
+        // a straight line of ground, all of it the same way ahead.
         let (track, paint, time, eye, shade, spots) = (&self.track, &self.paint, self.time, cam.pos, &*self.shade, &self.spots);
-        let (wide, thick) = (1.0 / (FOCAL * eye.y), 1.0 / th.fog);
-        self.scene.render(f, &|d: V3| {
-            if d.y > -0.004 { return sky_at(th, paint, d); }
-            let t = eye.y / -d.y;
-            let (x, z) = (eye.x + d.x * t, eye.z + d.z * t);
-            let mut c = track.ground(th, paint, x, z, t * t * wide, time);
-            let near = shade[((z as i32 & 127) << 7 | (x as i32 & 127)) as usize];
-            if near != 0 {
-                let dark = shadow(spots, near, x, z);
-                if dark > 0.0 { c = mix(c, 0x06080c, dark); }
+        let (right, up, fwd) = self.scene.axes();
+        self.scene.render_rows(f, &|y, px| {
+            let mid = fwd.mul(FOCAL).add(up.mul(H as f32 / 2.0 - (y as f32 + 0.5)));
+            let (len, mut d) = (mid.len(), mid.add(right.mul(0.5 - W as f32 / 2.0)));
+            if mid.y > -0.004 * len {
+                for p in px.iter_mut() { *p = sky_at(th, paint, d.norm()); d = d.add(right); }
+                return;
             }
-            mix(th.sky[1], c, fade(t * thick))
+            let t = eye.y / -mid.y;
+            let dist = t * len;
+            track.row(th, px, (eye.x + d.x * t, eye.z + d.z * t), (right.x * t, right.z * t), dist * dist / (FOCAL * eye.y), 1.0 - fade(dist / th.fog), time, shade, spots);
         });
         if self.flash > 0.0 { for p in &mut f.px { *p = blend(*p, 0xffffff, self.flash * 2.0); } }
     }
