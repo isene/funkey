@@ -79,6 +79,7 @@ Fifteen games come with the engine, and Doom below:
 - `again`: a puzzle you solve with your own past. A life is a handful of steps in a small room. Then time starts over, and the self you just were walks beside you and presses the same keys. One of you stands on a plate while the next walks through the door it opens. Twenty rooms of plates, doors, and gates that let only a past self through, or only the present one. Take back a step, a life or the room. The round that plays gains a voice with every self.
 - `kart`: in the spirit of Super Mario Kart. Eight karts on four tracks: a meadow, a beach, an icy pass and a desert. The road is flat and painted the way that game painted it, with the karts on it in 3D. Hop into a bend and hold the drift until the sparks turn blue or orange, then let go for a push. Boxes hand out six items, kinder ones to those at the back. A cup is four races of three laps, at 50, 100 or 150cc.
 - `chomp`: in the spirit of Pac-Man, with a maze, art and sound of its own. A muncher eats the dots while four chasers hunt it by the arcade's rules. They scatter to their corners and chase by turns. One comes straight for you, one aims ahead, one closes in from the other side, and one loses heart up close. A power dot turns the hunt around for a few seconds. Each level is faster, and the scared seconds get fewer.
+- `blocks`: in the spirit of Minecraft, the basics. A world of blocks grown from a seed: hills, tunnels through the stone and groves of trees. Walk it, dig into it and build on it with nine kinds of block. The corners where blocks meet are darker, and so is the ground under a roof. The world is kept when you leave. There is nothing to win.
 - `drive`: a car on a winding road over the hills, on the 3D rasterizer. Fetch the packages before the clock runs out, then more of them with less time. An arrow points at the nearest. Go fast, leave the road, regret it.
 
 ```bash
@@ -97,6 +98,7 @@ cargo run --release --example marble
 cargo run --release --example again
 cargo run --release --example kart
 cargo run --release --example chomp
+cargo run --release --example blocks
 ```
 
 `funkeys` is the picker: the games as cards with screenshots, Enter plays
@@ -172,7 +174,7 @@ writes the last frame. `DOOM_BENCH=1` times the renderer.
 The crate version is the engine's and moves only when the engine
 changes. Each game has its own version, shown on its title screen and
 tagged as `<game>-vX.Y`: `doom-v1.0`, `jumpman-v1.1`, `invaders-v1.0`,
-`drive-v1.0`, `soar-v1.1`, `climb-v1.0`, `castle-v1.1`, `gems-v1.3`, `salvo-v1.2`, `eliminator-v1.3`, `stack-v1.1`, `raid-v1.2`, `vector-v1.0`, `marble-v1.0`, `again-v1.0`, `kart-v1.2`, `chomp-v1.0`. The picker is `funkeys-v1.11`.
+`drive-v1.0`, `soar-v1.1`, `climb-v1.0`, `castle-v1.1`, `gems-v1.3`, `salvo-v1.2`, `eliminator-v1.3`, `stack-v1.1`, `raid-v1.2`, `vector-v1.0`, `marble-v1.0`, `again-v1.0`, `kart-v1.2`, `chomp-v1.0`. `blocks` is new and has no tag yet. The picker is `funkeys-v1.12`.
 
 ## Using it
 
