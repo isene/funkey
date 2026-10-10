@@ -12,10 +12,11 @@
 # stack sends its rows and level too: "ABC 12345 40 5".
 #
 # A list is a line per score, best first: "ABC 12345". The lists
-# live in FUNKEY_SCORES (default ~/funkey-scores on the server, writable
-# by www-data), outside the web root; edit a file there to take a score
-# out. One address may send a score every 15 seconds; an IPv6 address
-# counts by its first four groups, the block one home or phone gets.
+# live in FUNKEY_SCORES (default: the folder funkey-scores beside the
+# checkout, writable by www-data), outside the web root; edit a file
+# there to take a score out. One address may send a score every 15
+# seconds; an IPv6 address counts by its first four groups, the block
+# one home or phone gets.
 #
 # What it touches: recent.txt and one list for each game in DIR, nothing else.
 # No shell, no eval, no file named by the request: the game is checked
@@ -24,7 +25,10 @@
 
 require "digest"
 
-DIR = ENV["FUNKEY_SCORES"] || File.join(Dir.home, "funkey-scores")
+# The web server's user has another home than the one the checkout is
+# in, so the default goes by where this file really is, not by the link
+# in cgi-bin and not by a home folder.
+DIR = ENV["FUNKEY_SCORES"] || File.expand_path("../../funkey-scores", File.dirname(File.realpath(__FILE__)))
 GAMES = %w[stack drive eliminator gems invaders jumpman marble salvo vector].freeze
 KEEP = 10
 WAIT = 15
