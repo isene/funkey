@@ -900,20 +900,6 @@ impl Walls {
     }
 }
 
-/// A colour made brighter or darker by a factor.
-fn tint(c: Rgb, k: f32) -> Rgb {
-    let (r, g, b) = parts(c);
-    let s = |v: u8| (v as f32 * k).round().clamp(0.0, 255.0) as u8;
-    rgb(s(r), s(g), s(b))
-}
-
-/// The colour `t` of the way from `a` to `b`.
-fn mix(a: Rgb, b: Rgb, t: f32) -> Rgb {
-    let ((ar, ag, ab), (br, bg, bb)) = (parts(a), parts(b));
-    let l = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round().clamp(0.0, 255.0) as u8;
-    rgb(l(ar, br), l(ag, bg), l(ab, bb))
-}
-
 /// A soft dark oval on the floor under something standing there.
 fn shadow(f: &mut Frame, sx: i32, sy: i32, rx: i32) {
     let ry = (rx / 2).max(1);
@@ -923,60 +909,9 @@ fn shadow(f: &mut Frame, sx: i32, sy: i32, rx: i32) {
     }
 }
 
-/// Twice the size, with the diagonal steps smoothed (the Scale2x rule).
-fn scale2x(s: &Sprite) -> Sprite {
-    let (w, h) = (s.w, s.h);
-    let at = |x: i32, y: i32| if x < 0 || y < 0 || x >= w || y >= h { 0 } else { s.px[(y * w + x) as usize] };
-    let mut px = vec![0u32; (w * h * 4) as usize];
-    for y in 0..h {
-        for x in 0..w {
-            let (p, a, b, c, d) = (at(x, y), at(x, y - 1), at(x + 1, y), at(x - 1, y), at(x, y + 1));
-            let e0 = if c == a && c != d && a != b { a } else { p };
-            let e1 = if a == b && a != c && b != d { b } else { p };
-            let e2 = if d == c && d != b && c != a { c } else { p };
-            let e3 = if b == d && b != a && d != c { d } else { p };
-            let (i, w2) = ((y * 2 * w * 2 + x * 2) as usize, (w * 2) as usize);
-            px[i] = e0;
-            px[i + 1] = e1;
-            px[i + w2] = e2;
-            px[i + w2 + 1] = e3;
-        }
-    }
-    Sprite { w: w * 2, h: h * 2, px }
-}
-
-/// Light from above and the left: edges facing it lighter, the others darker.
-fn shade(s: &Sprite) -> Sprite {
-    let on = |x: i32, y: i32| x >= 0 && y >= 0 && x < s.w && y < s.h && s.px[(y * s.w + x) as usize] >> 24 != 0;
-    let mut out = s.clone();
-    for y in 0..s.h {
-        for x in 0..s.w {
-            let i = (y * s.w + x) as usize;
-            if s.px[i] >> 24 == 0 { continue; }
-            let k = if !on(x, y - 1) || !on(x - 1, y) { 1.25 } else if !on(x, y + 1) || !on(x + 1, y) { 0.72 } else { 1.0 };
-            out.px[i] = 0xff00_0000 | tint(s.px[i] & 0xff_ffff, k);
-        }
-    }
-    out
-}
-
-/// A one-pixel outline in `c` round the sprite.
-fn outline(s: &Sprite, c: Rgb) -> Sprite {
-    let (w, h) = (s.w + 2, s.h + 2);
-    let on = |x: i32, y: i32| x >= 1 && y >= 1 && x <= s.w && y <= s.h && s.px[((y - 1) * s.w + x - 1) as usize] >> 24 != 0;
-    let mut px = vec![0u32; (w * h) as usize];
-    for y in 0..h {
-        for x in 0..w {
-            px[(y * w + x) as usize] = if on(x, y) { s.px[((y - 1) * s.w + x - 1) as usize] }
-                else if on(x - 1, y) || on(x + 1, y) || on(x, y - 1) || on(x, y + 1) { 0xff00_0000 | c } else { 0 };
-        }
-    }
-    Sprite { w, h, px }
-}
-
 /// A small drawing made ready for the big screen: doubled, lit, outlined.
 fn fancy(rows: &[&str], palette: &[(char, Rgb)]) -> Sprite {
-    outline(&shade(&scale2x(&Sprite::from_rows(rows, palette))), 0x100818)
+    Sprite::from_rows(rows, palette).scale2x().shaded().outlined(0x100818)
 }
 
 /// The crystal ball: a lit sphere with a bright spot.
@@ -996,28 +931,7 @@ fn crystal_ball() -> Sprite {
             px[(y * n + x) as usize] = 0xff00_0000 | c;
         }
     }
-    outline(&Sprite { w: n, h: n, px }, 0x0c1830)
-}
-
-/// Big letters in a crystal gradient, with a light sweeping across them
-/// and a shadow under them.
-fn fancy_text(f: &mut Frame, cx: i32, y: i32, s: &str, scale: i32, time: f32) {
-    let (w, h) = (Frame::text_width(s, true, scale), 7 * scale);
-    let mut m = Frame::new(w + 1, h + 1);
-    m.text_scaled(0, 0, s, WHITE, true, scale);
-    let x0 = cx - w / 2;
-    let lit = |xx: i32, yy: i32| m.get(xx, yy) != BLACK;
-    for yy in 0..h { for xx in 0..w { if lit(xx, yy) { f.put(x0 + xx + scale / 2 + 1, y + yy + scale / 2 + 1, 0x000000); } } }
-    let band = ((time * 0.5).fract() * (w + h) as f32 * 1.6) as i32 - h;
-    for yy in 0..h {
-        for xx in 0..w {
-            if !lit(xx, yy) { continue; }
-            let mut c = mix(0xe8f8ff, 0x6070ff, yy as f32 / h as f32);
-            let d = (xx + yy - band).abs();
-            if d < scale * 2 { c = mix(c, WHITE, 1.0 - d as f32 / (scale * 2) as f32); }
-            f.put(x0 + xx, y + yy, c);
-        }
-    }
+    Sprite { w: n, h: n, px }.outlined(0x0c1830)
 }
 
 impl Game for Gems {
@@ -1072,7 +986,7 @@ impl Game for Gems {
         self.particles.draw(f, 0, 0);
         if self.mode == Mode::Title {
             f.dim(0.5);
-            fancy_text(f, W / 2, 48 + ((self.time * 2.0).sin() * 5.0) as i32, "GEMS", 12, self.time);
+            f.fancy_text(W / 2, 48 + ((self.time * 2.0).sin() * 5.0) as i32, "GEMS", 12, self.time, (0xe8f8ff, 0x6070ff));
             f.text_centered(W / 2, 150, "A TRIBUTE TO CRYSTAL CASTLES", TEXT, true, 2);
             f.text_centered(W / 2, 170, "ATARI 1983", 0x9090b0, false, 2);
             f.blit_scaled(&self.bear_img[0], W / 2 - 26, 190, 4, false);
@@ -1087,13 +1001,13 @@ impl Game for Gems {
         match self.mode {
             Mode::Clear(_) => {
                 f.dim(0.6);
-                fancy_text(f, W / 2, 140, "WAVE CLEAR", 5, self.time);
+                f.fancy_text(W / 2, 140, "WAVE CLEAR", 5, self.time, (0xe8f8ff, 0x6070ff));
                 if self.last_bonus > 0 { f.text_centered(W / 2, 196, &format!("LAST GEM BONUS {}", self.last_bonus), TEXT, true, 2); }
                 if self.wave == 2 { f.text_centered(W / 2, 222, &format!("ON TO {}", CASTLES[(self.castle + 1) % CASTLES.len()].name), GOLD, true, 2); }
             }
             Mode::Warp(_) => {
                 f.dim(0.5);
-                fancy_text(f, W / 2, 130, "WARP", 9, self.time * 4.0);
+                f.fancy_text(W / 2, 130, "WARP", 9, self.time * 4.0, (0xe8f8ff, 0x6070ff));
                 f.text_centered(W / 2, 212, "TO CASTLE 3  BONUS 5000", TEXT, true, 2);
             }
             Mode::Over(_) => {
@@ -1115,13 +1029,8 @@ fn main() {
     // GEMS_BENCH=<frames> plays that many frames with no terminal and
     // prints the time one takes.
     if let Ok(n) = std::env::var("GEMS_BENCH") {
-        let n: u32 = n.parse().unwrap_or(1000);
         game.start_game();
-        let mut f = Frame::new(W, H);
-        let input = Input::new();
-        let t0 = std::time::Instant::now();
-        for _ in 0..n { game.update(&input, 1.0 / 60.0); game.draw(&mut f); }
-        eprintln!("{:.3} ms a frame at {}x{} over {} frames", t0.elapsed().as_secs_f64() * 1000.0 / n as f64, W, H, n);
+        bench(&mut game, &Input::new(), Config { width: W, height: H, fps: 60 }, n.parse().unwrap_or(1000));
         return;
     }
     run(&mut game, Config { width: W, height: H, fps: 60 });

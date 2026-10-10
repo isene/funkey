@@ -1179,16 +1179,9 @@ fn main() {
     // AGAIN_BENCH=<frames> draws a room that many times with no terminal
     // and prints the time one frame takes.
     if let Ok(n) = std::env::var("AGAIN_BENCH") {
-        let n: u32 = n.parse().unwrap_or(600);
         let mut game = Again::new();
         game.go(ROOMS.len() - 3);
-        let (mut f, input) = (Frame::new(W, H), Input::new());
-        let t0 = std::time::Instant::now();
-        for _ in 0..n {
-            game.update(&input, 1.0 / 60.0);
-            game.draw(&mut f);
-        }
-        eprintln!("{:.3} ms a frame at {}x{} over {} frames", t0.elapsed().as_secs_f64() * 1000.0 / n as f64, W, H, n);
+        bench(&mut game, &Input::new(), Config { width: W, height: H, fps: 60 }, n.parse().unwrap_or(600));
         return;
     }
     let mut game = again();

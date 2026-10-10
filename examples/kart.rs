@@ -1237,21 +1237,9 @@ impl Models {
     }
 }
 
-/// A sample from a wave: `wave(seconds, noise)` gives -1 to 1.
-fn synth(secs: f32, mut wave: impl FnMut(f32, f32) -> f32) -> Sample {
-    let rate = funkey::audio::RATE as f32;
-    let mut x = 0x2545_f491u32;
-    Sample::from_i16((0..(secs * rate) as usize).map(|i| {
-        x ^= x << 13; x ^= x >> 17; x ^= x << 5;
-        (wave(i as f32 / rate, (x >> 8) as f32 / 8388608.0 - 1.0).clamp(-1.0, 1.0) * 32000.0) as i16
-    }).collect())
-}
-
 /// Two tunes of the same length as one sample, so they never drift apart.
 fn duet(lead: &str, bass: &str) -> Sample {
-    let (a, b) = (Tune::parse(lead, Wave::Square, 0.09).render(), Tune::parse(bass, Wave::Triangle, 0.28).render());
-    let at = |s: &Sample, i: usize| *s.data.get(i).unwrap_or(&0) as i32;
-    Sample::from_i16((0..a.data.len().max(b.data.len())).map(|i| (at(&a, i) + at(&b, i)).clamp(-32768, 32767) as i16).collect())
+    Tune::parse(lead, Wave::Square, 0.09).render().mixed(&Tune::parse(bass, Wave::Triangle, 0.28).render())
 }
 
 const TITLE: [&str; 2] = ["168 g5/8 b5/8 d6/8 b5/8 g5/8 b5/8 d6/4 e6/8 d6/8 b5/8 g5/8 a5/4 d5/4 \
@@ -1266,7 +1254,7 @@ impl Sounds {
         Sounds {
             title: duet(TITLE[0], TITLE[1]),
             engine: Sample::loop_tone(Wave::Saw, 62.0, 0.5, 0.22),
-            skid: synth(0.4, |_, r| r * 0.25),
+            skid: Sample::synth(0.4, |_, r| r * 0.25),
             tick: Sample::tone(Wave::Square, 520.0, 0.12, 0.3),
             go: Sample::tone(Wave::Square, 1040.0, 0.45, 0.3),
             pick: Sample::sweep(Wave::Triangle, 500.0, 1200.0, 0.12, 0.4),
@@ -1275,7 +1263,7 @@ impl Sounds {
             hit: Sample::sweep(Wave::Saw, 500.0, 60.0, 0.5, 0.4),
             fire: Sample::sweep(Wave::Square, 900.0, 300.0, 0.15, 0.3),
             star: Tune::parse("300 c5/16 e5/16 g5/16 c6/16 e6/16 g6/16 c7/8", Wave::Square, 0.25).render(),
-            zap: synth(0.4, |t, r| r * (1.0 - t / 0.4) * 0.6),
+            zap: Sample::synth(0.4, |t, r| r * (1.0 - t / 0.4) * 0.6),
             lap: Tune::parse("240 g5/8 c6/8 e6/4", Wave::Triangle, 0.4).render(),
             last: Tune::parse("300 g5/16 g5/16 g5/16 c6/8 g5/16 c6/16 e6/4", Wave::Square, 0.25).render(),
             win: Tune::parse("200 c5/8 e5/8 g5/8 c6/4 a5/8 b5/8 c6/2", Wave::Triangle, 0.45).render(),
@@ -2026,15 +2014,7 @@ fn main() {
     // KART_BENCH=<frames> races that many frames with no terminal and
     // prints the time one takes.
     if let Ok(n) = std::env::var("KART_BENCH") {
-        let n: u32 = n.parse().unwrap_or(300);
-        let mut game = Kart::new();
-        let (mut f, input) = (Frame::new(W, H), Input::new());
-        let t0 = std::time::Instant::now();
-        for _ in 0..n {
-            game.update(&input, 1.0 / 30.0);
-            game.draw(&mut f);
-        }
-        eprintln!("{:.2} ms a frame at {}x{} over {} frames", t0.elapsed().as_secs_f64() * 1000.0 / n as f64, W, H, n);
+        bench(&mut Kart::new(), &Input::new(), Config { width: W, height: H, fps: 30 }, n.parse().unwrap_or(300));
         return;
     }
     run(&mut kart(), Config { width: W, height: H, fps: 30 });

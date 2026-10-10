@@ -17,6 +17,7 @@
 //! from its targets; `RAID_BENCH=<frames>` times the game with no
 //! terminal. Everything here is new: the land, the models and the sounds.
 
+use funkey::noise::{fbm, noise, ridged, smooth};
 use funkey::*;
 use std::f32::consts::{PI, TAU};
 
@@ -63,50 +64,6 @@ const HUD: Rgb = 0x50ff80;
 const AMBER: Rgb = 0xffc040;
 const RED: Rgb = 0xff4838;
 const TEXT: Rgb = 0xf0f0f0;
-
-fn hash(x: i32, y: i32, seed: u32) -> f32 {
-    let mut h = (x as u32).wrapping_mul(0x8da6b343) ^ (y as u32).wrapping_mul(0xd8163841) ^ seed.wrapping_mul(0xcb1ab31f);
-    h ^= h >> 13; h = h.wrapping_mul(0x5bd1e995); h ^= h >> 15;
-    (h & 0xffffff) as f32 / 16777216.0
-}
-
-fn smooth(t: f32) -> f32 { t * t * (3.0 - 2.0 * t) }
-
-/// Value noise on a lattice that repeats every `period` cells.
-fn noise(x: f32, y: f32, period: i32, seed: u32) -> f32 {
-    let (xi, yi) = (x.floor() as i32, y.floor() as i32);
-    let (fx, fy) = (smooth(x - xi as f32), smooth(y - yi as f32));
-    let g = |ix: i32, iy: i32| hash(ix.rem_euclid(period), iy.rem_euclid(period), seed);
-    let a = g(xi, yi) + (g(xi + 1, yi) - g(xi, yi)) * fx;
-    let b = g(xi, yi + 1) + (g(xi + 1, yi + 1) - g(xi, yi + 1)) * fx;
-    a + (b - a) * fy
-}
-
-/// Layers of noise, each twice as fine and half as tall. The coarsest
-/// repeats every `period` cells, so the land meets itself at its edges.
-fn fbm(x: f32, y: f32, octaves: u32, seed: u32, period: i32) -> f32 {
-    let (mut sum, mut amp, mut freq, mut norm) = (0.0, 0.5, 1.0, 0.0);
-    for o in 0..octaves {
-        sum += noise(x * freq, y * freq, period << o, seed + o) * amp;
-        norm += amp;
-        amp *= 0.5;
-        freq *= 2.0;
-    }
-    sum / norm
-}
-
-/// Ridges: the absolute value of a noise folded over, for mountains.
-fn ridged(x: f32, y: f32, octaves: u32, seed: u32) -> f32 {
-    let (mut sum, mut amp, mut freq, mut norm) = (0.0, 0.5, 1.0, 0.0);
-    for o in 0..octaves {
-        let n = 1.0 - (noise(x * freq, y * freq, 6 << o, seed + o) * 2.0 - 1.0).abs();
-        sum += n * n * amp;
-        norm += amp;
-        amp *= 0.5;
-        freq *= 2.0;
-    }
-    sum / norm
-}
 
 fn lerp(a: Rgb, b: Rgb, t: f32) -> Rgb { funkey::raster::blend(a, b, t.clamp(0.0, 1.0)) }
 
@@ -1033,18 +990,6 @@ fn muster(t: &Terrain, n: usize, site: (f32, f32)) -> Vec<Foe> {
     foes
 }
 
-/// A sound made a sample at a time: the time in seconds and a random
-/// number from -1 to 1 go in, the loudness from -1 to 1 comes out.
-fn synth(secs: f32, mut wave: impl FnMut(f32, f32) -> f32) -> Sample {
-    let rate = funkey::audio::RATE as f32;
-    let mut x = 0x2545_f491u32;
-    Sample::from_i16((0..(secs * rate) as usize).map(|i| {
-        x ^= x << 13; x ^= x >> 17; x ^= x << 5;
-        let r = (x >> 8) as f32 / 8388608.0 - 1.0;
-        (wave(i as f32 / rate, r).clamp(-1.0, 1.0) * 32000.0) as i16
-    }).collect())
-}
-
 const TUNE: &str = "112 a4/2 e5/4 d5/8 c5/8 b4/2 g4/2 a4/2 e5/4 f5/8 e5/8 d5/1 \
     c5/2 g5/4 f5/8 e5/8 d5/2 b4/2 c5/4 b4/4 a4/4 g#4/4 a4/1";
 const BASS: &str = "112 a2/8 a2/8 a2/8 a2/8 a2/8 a2/8 a2/8 a2/8 g2/8 g2/8 g2/8 g2/8 g2/8 g2/8 g2/8 g2/8 \
@@ -1064,24 +1009,24 @@ impl Sounds {
         // The rotor: twelve blade beats a second over a thin whine. One
         // second long, and every part of it fits that second whole.
         let mut lp = 0.0f32;
-        let rotor = synth(1.0, |t, r| {
+        let rotor = Sample::synth(1.0, |t, r| {
             let beat = (-(t * 12.0).fract() * 7.0).exp();
             lp += (r - lp) * 0.12;
             lp * beat * 1.7 + (TAU * 48.0 * t).sin() * beat * 0.35 + (TAU * 300.0 * t).sin() * 0.03 + lp * 0.15
         });
-        let gun = synth(0.08, |t, r| (r * 0.7 + if (t * 150.0).fract() < 0.5 { 0.5 } else { -0.5 }) * (-t * 40.0).exp());
+        let gun = Sample::synth(0.08, |t, r| (r * 0.7 + if (t * 150.0).fract() < 0.5 { 0.5 } else { -0.5 }) * (-t * 40.0).exp());
         let mut lp = 0.0f32;
-        let rocket = synth(0.7, |t, r| { lp += (r - lp) * (0.08 + t * 0.3); lp * (1.0 - t / 0.7) * 1.8 });
+        let rocket = Sample::synth(0.7, |t, r| { lp += (r - lp) * (0.08 + t * 0.3); lp * (1.0 - t / 0.7) * 1.8 });
         let mut lp = 0.0f32;
-        let missile = synth(1.0, |t, r| { lp += (r - lp) * 0.25; (lp * 1.2 + (TAU * (180.0 + 250.0 * t) * t).sin() * 0.15) * (1.0 - t).powf(0.7) });
+        let missile = Sample::synth(1.0, |t, r| { lp += (r - lp) * 0.25; (lp * 1.2 + (TAU * (180.0 + 250.0 * t) * t).sin() * 0.15) * (1.0 - t).powf(0.7) });
         let mut lp = 0.0f32;
-        let boom = synth(1.4, |t, r| {
+        let boom = Sample::synth(1.4, |t, r| {
             lp += (r - lp) * (0.05 + 0.25 * (-t * 6.0).exp());
             lp * 2.6 * (-t * 3.0).exp() + (TAU * (62.0 - 11.0 * t) * t).sin() * 0.7 * (-t * 4.5).exp()
         });
-        let clank = synth(0.12, |t, r| ((TAU * (900.0 - 2000.0 * t) * t).sin() * 0.6 + r * 0.4) * (-t * 28.0).exp());
+        let clank = Sample::synth(0.12, |t, r| ((TAU * (900.0 - 2000.0 * t) * t).sin() * 0.6 + r * 0.4) * (-t * 28.0).exp());
         let mut lp = 0.0f32;
-        let thud = synth(0.09, |t, r| { lp += (r - lp) * 0.2; lp * 2.0 * (-t * 30.0).exp() });
+        let thud = Sample::synth(0.09, |t, r| { lp += (r - lp) * 0.2; lp * 2.0 * (-t * 30.0).exp() });
         Sounds { title, rotor, gun, rocket, missile, boom, clank, thud,
             lock: Sample::tone(Wave::Square, 990.0, 0.07, 0.18),
             launch: Sample::tone(Wave::Square, 1480.0, 0.05, 0.22),
@@ -2282,18 +2227,11 @@ fn main() {
     // RAID_BENCH=<frames> flies that many frames with no terminal and
     // prints the time one takes.
     if let Ok(n) = std::env::var("RAID_BENCH") {
-        let n: u32 = n.parse().unwrap_or(300);
         let mut game = raid(false);
         if game.mode == Mode::Title { game.start(); game.mode = Mode::Fly; }
-        let mut f = Frame::new(W, H);
         let mut input = Input::new();
         input.inject(Key::Up);
-        let t0 = std::time::Instant::now();
-        for _ in 0..n {
-            game.update(&input, 1.0 / 30.0);
-            game.draw(&mut f);
-        }
-        eprintln!("{:.2} ms a frame at {}x{} over {} frames", t0.elapsed().as_secs_f64() * 1000.0 / n as f64, W, H, n);
+        bench(&mut game, &input, Config { width: W, height: H, fps: 30 }, n.parse().unwrap_or(300));
         return;
     }
     run(&mut raid(true), Config { width: W, height: H, fps: 30 });

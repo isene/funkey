@@ -38,6 +38,7 @@ pub mod doom;
 pub mod font;
 pub mod frame;
 pub mod input;
+pub mod noise;
 pub mod page;
 pub mod particles;
 pub mod raster;
@@ -52,7 +53,7 @@ pub mod wad;
 pub mod web;
 
 pub use audio::{Audio, Sample, Tune, Wave};
-pub use frame::{parts, rgb, Frame, Rgb, BLACK, WHITE};
+pub use frame::{mix, parts, rgb, tint, Frame, Rgb, BLACK, WHITE};
 pub use input::{Input, Key};
 pub use particles::Particles;
 pub use raster::{Cam3, Mat, Mesh, Model, Raster, Scene, Texture, Vert, CUTOUT, M4, V3};
@@ -139,6 +140,23 @@ pub fn run(game: &mut dyn Game, cfg: Config) {
         let now = Instant::now();
         if next > now { std::thread::sleep((next - now).min(step)); }
     }
+}
+
+/// Time a game with no terminal: `frames` updates and draws with the
+/// keys in `input` held, then the time one frame took, on stderr. The
+/// last frame comes back, for a picture of where the run ended.
+#[cfg(feature = "term")]
+pub fn bench(game: &mut dyn Game, input: &Input, cfg: Config, frames: u32) -> Frame {
+    let mut frame = Frame::new(cfg.width, cfg.height);
+    let dt = 1.0 / cfg.fps.max(1) as f32;
+    let t0 = Instant::now();
+    for _ in 0..frames {
+        game.update(input, dt);
+        game.draw(&mut frame);
+    }
+    let ms = t0.elapsed().as_secs_f64() * 1000.0 / frames.max(1) as f64;
+    eprintln!("{:.3} ms a frame at {}x{} over {} frames", ms, cfg.width, cfg.height, frames);
+    frame
 }
 
 #[cfg(feature = "term")]

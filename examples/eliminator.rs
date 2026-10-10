@@ -20,6 +20,7 @@
 //! higher up; `ELIMINATOR_SEED=<n>` fixes the maze; `ELIMINATOR_FOE=<n>`
 //! puts that foe, awake, at your right hand.
 
+use funkey::noise::hash;
 use funkey::*;
 use std::collections::VecDeque;
 
@@ -1817,7 +1818,7 @@ impl Eliminator {
                     ((1.0 - (d / (r + 0.8)).powi(2) * 0.8) * flick).clamp(0.15, 1.0)
                 } else { 0.2 };
                 let t = self.map[i];
-                let v = (hash(mx, my) * 4.0) as usize % 4;
+                let v = (hash(mx, my, 0) * 4.0) as usize % 4;
                 let tex = match t {
                     T::Wall => {
                         let below = inside(mx, my + 1) && self.map[idx(mx, my + 1)] != T::Wall;
@@ -2009,11 +2010,11 @@ impl Eliminator {
         f.clear(0x080604);
         for y in 0..H {
             for x in (0..W).step_by(2) {
-                let n = hash(x / 6, y / 6);
+                let n = hash(x / 6, y / 6, 0);
                 if n > 0.93 { f.put(x, y, 0x1c140c); }
             }
         }
-        fancy_text(f, W / 2, 14, "THE ELIMINATOR", 5, self.time);
+        f.fancy_text(W / 2, 14, "THE ELIMINATOR", 5, self.time * 0.8, (0xffe8a0, 0xb04010));
         f.text_centered(W / 2, 56, "AN AMAR RPG DUNGEON  D6GAMING.ORG", DIM, true, 1);
         let lore = [
             "Beneath the royal castle in Amaron lies the Eliminator.",
@@ -2313,14 +2314,6 @@ fn tick(v: &mut Vec<(i32, i32)>) {
 
 fn on_view(x: i32, y: i32) -> bool { x >= 0 && y >= 0 && x < VW * TILE && y < VH * TILE }
 
-fn hash(x: i32, y: i32) -> f32 {
-    let mut h = (x as u32).wrapping_mul(0x8da6_b343) ^ (y as u32).wrapping_mul(0xd816_3841);
-    h ^= h >> 13;
-    h = h.wrapping_mul(0x5bd1_e995);
-    h ^= h >> 15;
-    (h & 0xff_ffff) as f32 / 16_777_216.0
-}
-
 fn wrap(s: &str, width: usize) -> Vec<String> {
     let mut out = Vec::new();
     let mut line = String::new();
@@ -2333,18 +2326,6 @@ fn wrap(s: &str, width: usize) -> Vec<String> {
     }
     if !line.is_empty() { out.push(line); }
     out
-}
-
-fn tint(c: Rgb, k: f32) -> Rgb {
-    let (r, g, b) = parts(c);
-    let s = |v: u8| (v as f32 * k).round().clamp(0.0, 255.0) as u8;
-    rgb(s(r), s(g), s(b))
-}
-
-fn mix(a: Rgb, b: Rgb, t: f32) -> Rgb {
-    let ((ar, ag, ab), (br, bg, bb)) = (parts(a), parts(b));
-    let l = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round().clamp(0.0, 255.0) as u8;
-    rgb(l(ar, br), l(ag, bg), l(ab, bb))
 }
 
 /// Torchlight: warm, falling off with distance.
@@ -2375,25 +2356,25 @@ fn textures(level: usize) -> Vec<Vec<Rgb>> {
         out.push((0..TILE * TILE).map(|i| {
             let (x, y) = (i % TILE, i / TILE);
             let grout = x == 0 || y == 0 || (x == 7 && (y + v) % 14 < 7) || (y == 7 && v % 2 == 0);
-            let n = hash(x + v * 31, y + v * 17);
+            let n = hash(x + v * 31, y + v * 17, 0);
             if grout { tint(floor, 0.55) } else { tint(floor, 0.85 + 0.3 * n) }
         }).collect());
     }
     for v in 0..4 {
         out.push((0..TILE * TILE).map(|i| {
             let (x, y) = (i % TILE, i / TILE);
-            if y < 3 { return tint(top, 1.3 + 0.2 * hash(x + v, y)); }
+            if y < 3 { return tint(top, 1.3 + 0.2 * hash(x + v, y, 0)); }
             let row = (y - 3) / 4;
             let off = if row % 2 == 0 { 0 } else { 4 };
             let mortar = (y - 3) % 4 == 0 || (x + off + v) % 8 == 0;
-            let n = hash(x + v * 7, y + v * 3);
+            let n = hash(x + v * 7, y + v * 3, 0);
             if mortar { tint(wall, 0.5) } else { tint(wall, (0.8 + 0.3 * n) * (1.0 - (y - 3) as f32 * 0.02)) }
         }).collect());
     }
     for v in 0..4 {
         out.push((0..TILE * TILE).map(|i| {
             let (x, y) = (i % TILE, i / TILE);
-            tint(top, 0.8 + 0.4 * hash(x + v * 5, y + v * 11))
+            tint(top, 0.8 + 0.4 * hash(x + v * 5, y + v * 11, 0))
         }).collect());
     }
     out
@@ -2474,57 +2455,8 @@ fn put_white(f: &mut Frame, s: &Sprite, x: i32, y: i32) {
     }
 }
 
-/// Twice the size, with the diagonal steps smoothed (the Scale2x rule).
-fn scale2x(s: &Sprite) -> Sprite {
-    let (w, h) = (s.w, s.h);
-    let at = |x: i32, y: i32| if x < 0 || y < 0 || x >= w || y >= h { 0 } else { s.px[(y * w + x) as usize] };
-    let mut px = vec![0u32; (w * h * 4) as usize];
-    for y in 0..h {
-        for x in 0..w {
-            let (p, a, b, c, d) = (at(x, y), at(x, y - 1), at(x + 1, y), at(x - 1, y), at(x, y + 1));
-            let e0 = if c == a && c != d && a != b { a } else { p };
-            let e1 = if a == b && a != c && b != d { b } else { p };
-            let e2 = if d == c && d != b && c != a { c } else { p };
-            let e3 = if b == d && b != a && d != c { d } else { p };
-            let (i, w2) = ((y * 2 * w * 2 + x * 2) as usize, (w * 2) as usize);
-            px[i] = e0;
-            px[i + 1] = e1;
-            px[i + w2] = e2;
-            px[i + w2 + 1] = e3;
-        }
-    }
-    Sprite { w: w * 2, h: h * 2, px }
-}
-
-fn shade(s: &Sprite) -> Sprite {
-    let on = |x: i32, y: i32| x >= 0 && y >= 0 && x < s.w && y < s.h && s.px[(y * s.w + x) as usize] >> 24 != 0;
-    let mut out = s.clone();
-    for y in 0..s.h {
-        for x in 0..s.w {
-            let i = (y * s.w + x) as usize;
-            if s.px[i] >> 24 == 0 { continue; }
-            let k = if !on(x, y - 1) || !on(x - 1, y) { 1.25 } else if !on(x, y + 1) || !on(x + 1, y) { 0.72 } else { 1.0 };
-            out.px[i] = 0xff00_0000 | tint(s.px[i] & 0xff_ffff, k);
-        }
-    }
-    out
-}
-
-fn outline(s: &Sprite, c: Rgb) -> Sprite {
-    let (w, h) = (s.w + 2, s.h + 2);
-    let on = |x: i32, y: i32| x >= 1 && y >= 1 && x <= s.w && y <= s.h && s.px[((y - 1) * s.w + x - 1) as usize] >> 24 != 0;
-    let mut px = vec![0u32; (w * h) as usize];
-    for y in 0..h {
-        for x in 0..w {
-            px[(y * w + x) as usize] = if on(x, y) { s.px[((y - 1) * s.w + x - 1) as usize] }
-                else if on(x - 1, y) || on(x + 1, y) || on(x, y - 1) || on(x, y + 1) { 0xff00_0000 | c } else { 0 };
-        }
-    }
-    Sprite { w, h, px }
-}
-
 fn fancy(rows: &[&str], palette: &[(char, Rgb)]) -> Sprite {
-    outline(&shade(&scale2x(&Sprite::from_rows(rows, palette))), 0x0c0806)
+    Sprite::from_rows(rows, palette).scale2x().shaded().outlined(0x0c0806)
 }
 
 /// Every picture: the three contenders, the foes, the things lying about.
@@ -2558,31 +2490,8 @@ fn art() -> Vec<Sprite> {
     ]
 }
 
-fn fancy_text(f: &mut Frame, cx: i32, y: i32, s: &str, scale: i32, time: f32) {
-    let (w, h) = (Frame::text_width(s, true, scale), 7 * scale);
-    let mut m = Frame::new(w + 1, h + 1);
-    m.text_scaled(0, 0, s, WHITE, true, scale);
-    let x0 = cx - w / 2;
-    let lit = |xx: i32, yy: i32| m.get(xx, yy) != BLACK;
-    for yy in 0..h { for xx in 0..w { if lit(xx, yy) { f.put(x0 + xx + scale / 2 + 1, y + yy + scale / 2 + 1, 0x000000); } } }
-    let band = ((time * 0.4).fract() * (w + h) as f32 * 1.6) as i32 - h;
-    for yy in 0..h {
-        for xx in 0..w {
-            if !lit(xx, yy) { continue; }
-            let mut c = mix(0xffe8a0, 0xb04010, yy as f32 / h as f32);
-            let d = (xx + yy - band).abs();
-            if d < scale * 2 { c = mix(c, WHITE, 1.0 - d as f32 / (scale * 2) as f32); }
-            f.put(x0 + xx, y + yy, c);
-        }
-    }
-}
-
 fn duet(tune: &str, bass: &str, vol: f32) -> Sample {
-    let a = Tune::parse(tune, Wave::Triangle, 0.2 * vol).render();
-    let b = Tune::parse(bass, Wave::Triangle, 0.3 * vol).render();
-    let at = |s: &Sample, i: usize| *s.data.get(i).unwrap_or(&0) as i32;
-    let n = a.data.len().max(b.data.len());
-    Sample::from_i16((0..n).map(|i| (at(&a, i) + at(&b, i)).clamp(-32768, 32767) as i16).collect())
+    Tune::parse(tune, Wave::Triangle, 0.2 * vol).render().mixed(&Tune::parse(bass, Wave::Triangle, 0.3 * vol).render())
 }
 
 fn sounds() -> Sounds {
@@ -2746,7 +2655,7 @@ impl Game for Eliminator {
             }
             Mode::Won(_) => {
                 f.rect(30, 70, VW * TILE - 60, 130, 0x14100a);
-                fancy_text(f, VW * TILE / 2, 80, "YOU WALK OUT", 3, self.time);
+                f.fancy_text(VW * TILE / 2, 80, "YOU WALK OUT", 3, self.time * 0.8, (0xffe8a0, 0xb04010));
                 f.text_centered(VW * TILE / 2, 112, "The gate grinds open. Daylight.", TEXT, true, 1);
                 f.text_centered(VW * TILE / 2, 124, "By the King's word you rise a noble of Amar.", TEXT, true, 1);
                 f.text_centered(VW * TILE / 2, 146, &format!("SCORE {}   HIGH {}", self.score(), self.high), GOLD, true, 1);

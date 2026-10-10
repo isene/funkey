@@ -1,7 +1,7 @@
 //! Sprites: small pictures with transparent pixels. Drawn in code as
 //! rows of characters with a palette, so a game needs no image files.
 
-use crate::frame::Rgb;
+use crate::frame::{tint, Rgb};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Sprite {
@@ -79,6 +79,60 @@ impl Sprite {
         Sprite { w: self.w, h: self.h, px: self.px.iter().map(|&p| if p & 0xff00_0000 == 0 { 0 } else { 0xff00_0000 | c }).collect() }
     }
 
+    /// Twice the size with the stair steps of diagonals smoothed (the
+    /// Scale2x rule): small pixel art made big without getting blocky.
+    pub fn scale2x(&self) -> Sprite {
+        let (w, h) = (self.w, self.h);
+        let at = |x: i32, y: i32| if x < 0 || y < 0 || x >= w || y >= h { 0 } else { self.px[(y * w + x) as usize] };
+        let mut px = vec![0u32; (w * h * 4) as usize];
+        for y in 0..h {
+            for x in 0..w {
+                let (p, a, b, c, d) = (at(x, y), at(x, y - 1), at(x + 1, y), at(x - 1, y), at(x, y + 1));
+                let e0 = if c == a && c != d && a != b { a } else { p };
+                let e1 = if a == b && a != c && b != d { b } else { p };
+                let e2 = if d == c && d != b && c != a { c } else { p };
+                let e3 = if b == d && b != a && d != c { d } else { p };
+                let (i, w2) = ((y * 2 * w * 2 + x * 2) as usize, (w * 2) as usize);
+                px[i] = e0;
+                px[i + 1] = e1;
+                px[i + w2] = e2;
+                px[i + w2 + 1] = e3;
+            }
+        }
+        Sprite { w: w * 2, h: h * 2, px }
+    }
+
+    /// Lit from the top left: the edge pixels there a little brighter,
+    /// the ones at the bottom right a little darker.
+    pub fn shaded(&self) -> Sprite {
+        let on = |x: i32, y: i32| x >= 0 && y >= 0 && x < self.w && y < self.h && self.px[(y * self.w + x) as usize] >> 24 != 0;
+        let mut out = self.clone();
+        for y in 0..self.h {
+            for x in 0..self.w {
+                let i = (y * self.w + x) as usize;
+                if self.px[i] >> 24 == 0 { continue; }
+                let k = if !on(x, y - 1) || !on(x - 1, y) { 1.25 } else if !on(x, y + 1) || !on(x + 1, y) { 0.72 } else { 1.0 };
+                out.px[i] = 0xff00_0000 | tint(self.px[i] & 0xff_ffff, k);
+            }
+        }
+        out
+    }
+
+    /// With a line of colour `c` one pixel wide around the shape. The
+    /// sprite grows by a pixel on every side.
+    pub fn outlined(&self, c: Rgb) -> Sprite {
+        let (w, h) = (self.w + 2, self.h + 2);
+        let on = |x: i32, y: i32| x >= 1 && y >= 1 && x <= self.w && y <= self.h && self.px[((y - 1) * self.w + x - 1) as usize] >> 24 != 0;
+        let mut px = vec![0u32; (w * h) as usize];
+        for y in 0..h {
+            for x in 0..w {
+                px[(y * w + x) as usize] = if on(x, y) { self.px[((y - 1) * self.w + x - 1) as usize] }
+                    else if on(x - 1, y) || on(x + 1, y) || on(x, y - 1) || on(x, y + 1) { 0xff00_0000 | c } else { 0 };
+            }
+        }
+        Sprite { w, h, px }
+    }
+
     pub fn flipped(&self) -> Sprite {
         let mut px = Vec::with_capacity(self.px.len());
         for y in 0..self.h {
@@ -101,5 +155,23 @@ mod tests {
         assert_eq!(s.px[2], 0, "a short row is padded");
         assert_eq!(s.flipped().px[0], 0);
         assert_eq!(s.flipped().px[2], 0xffff0000);
+    }
+
+    #[test]
+    fn a_sprite_grows_gets_light_and_a_line_around_it() {
+        let s = Sprite::solid(3, 3, 0x808080);
+        let big = s.scale2x();
+        assert_eq!((big.w, big.h), (6, 6));
+        assert_eq!(big.px[0], 0, "a corner is rounded off");
+        assert_eq!(big.px[14], 0xff808080, "the inside stays plain");
+        let lit = s.shaded();
+        assert_eq!(lit.px[0], 0xffa0a0a0, "the top left edge is brighter");
+        assert_eq!(lit.px[4], 0xff808080, "the middle is as it was");
+        assert_eq!(lit.px[8], 0xff5c5c5c, "the bottom right edge is darker");
+        let ring = s.outlined(0x0000ff);
+        assert_eq!((ring.w, ring.h), (5, 5));
+        assert_eq!(ring.px[0], 0, "a corner stays clear");
+        assert_eq!(ring.px[1], 0xff0000ff);
+        assert_eq!(ring.px[6], 0xff808080);
     }
 }

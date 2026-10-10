@@ -9,6 +9,7 @@
 //! Space hands the controls back to the autopilot, Q quits.
 //! `SOAR_BENCH=<frames>` times the flight with no terminal.
 
+use funkey::noise::{noise, ridged, smooth};
 use funkey::*;
 
 const W: i32 = 640;
@@ -26,50 +27,8 @@ const HAZE: Rgb = 0xe6d2b4;
 /// The game's own version; the engine has its own.
 const VERSION: &str = "1.1";
 
-fn hash(x: i32, y: i32, seed: u32) -> f32 {
-    let mut h = (x as u32).wrapping_mul(0x8da6b343) ^ (y as u32).wrapping_mul(0xd8163841) ^ seed.wrapping_mul(0xcb1ab31f);
-    h ^= h >> 13; h = h.wrapping_mul(0x5bd1e995); h ^= h >> 15;
-    (h & 0xffffff) as f32 / 16777216.0
-}
-
-fn smooth(t: f32) -> f32 { t * t * (3.0 - 2.0 * t) }
-
-/// Value noise on a lattice that repeats every `period` cells.
-fn noise(x: f32, y: f32, period: i32, seed: u32) -> f32 {
-    let (xi, yi) = (x.floor() as i32, y.floor() as i32);
-    let (fx, fy) = (smooth(x - xi as f32), smooth(y - yi as f32));
-    let g = |ix: i32, iy: i32| hash(ix.rem_euclid(period), iy.rem_euclid(period), seed);
-    let a = g(xi, yi) + (g(xi + 1, yi) - g(xi, yi)) * fx;
-    let b = g(xi, yi + 1) + (g(xi + 1, yi + 1) - g(xi, yi + 1)) * fx;
-    a + (b - a) * fy
-}
-
 /// Layers of noise, each twice as fine and half as tall.
-fn fbm(x: f32, y: f32, octaves: u32, seed: u32) -> f32 {
-    let (mut sum, mut amp, mut freq, mut norm) = (0.0, 0.5, 1.0, 0.0);
-    for o in 0..octaves {
-        let period = (8 << o).max(1);
-        sum += noise(x * freq, y * freq, period, seed + o) * amp;
-        norm += amp;
-        amp *= 0.5;
-        freq *= 2.0;
-    }
-    sum / norm
-}
-
-/// Ridges: the absolute value of a noise folded over, for mountains.
-fn ridged(x: f32, y: f32, octaves: u32, seed: u32) -> f32 {
-    let (mut sum, mut amp, mut freq, mut norm) = (0.0, 0.5, 1.0, 0.0);
-    for o in 0..octaves {
-        let period = (6 << o).max(1);
-        let n = 1.0 - (noise(x * freq, y * freq, period, seed + o) * 2.0 - 1.0).abs();
-        sum += n * n * amp;
-        norm += amp;
-        amp *= 0.5;
-        freq *= 2.0;
-    }
-    sum / norm
-}
+fn fbm(x: f32, y: f32, octaves: u32, seed: u32) -> f32 { funkey::noise::fbm(x, y, octaves, seed, 8) }
 
 fn lerp(a: Rgb, b: Rgb, t: f32) -> Rgb { funkey::raster::blend(a, b, t.clamp(0.0, 1.0)) }
 fn scale(c: Rgb, k: f32) -> Rgb {
@@ -429,12 +388,7 @@ fn main() {
     // SOAR_BENCH=<frames> flies that many frames with no terminal and
     // prints the time one takes.
     if let Ok(n) = std::env::var("SOAR_BENCH") {
-        let n: u32 = n.parse().unwrap_or(300);
-        let mut f = Frame::new(W, H);
-        let input = Input::new();
-        let t0 = std::time::Instant::now();
-        for _ in 0..n { game.update(&input, 1.0 / 30.0); game.draw(&mut f); }
-        eprintln!("{:.2} ms a frame at {}x{} over {} frames", t0.elapsed().as_secs_f64() * 1000.0 / n as f64, W, H, n);
+        bench(&mut game, &Input::new(), Config { width: W, height: H, fps: 30 }, n.parse().unwrap_or(300));
         return;
     }
     run(&mut game, Config { width: W, height: H, fps: 30 });

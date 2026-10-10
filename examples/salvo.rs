@@ -13,6 +13,7 @@
 //! stage; `SALVO_BENCH=<frames>` times the game with no terminal.
 //! Everything here is new: the stages, the ships and the music.
 
+use funkey::noise::hash;
 use funkey::*;
 use std::collections::VecDeque;
 use std::f32::consts::PI;
@@ -96,19 +97,7 @@ const BASS_TITLE: &str = "120 d3/4 a3/4 d3/4 a3/4 g2/4 d3/4 g2/4 d3/4 bb2/4 f3/4
 
 /// A tune over a bass line, mixed into one loop so the two never drift.
 fn duet(tune: &str, bass: &str) -> Sample {
-    let a = Tune::parse(tune, Wave::Square, 0.14).render();
-    let b = Tune::parse(bass, Wave::Triangle, 0.32).render();
-    let at = |s: &Sample, i: usize| *s.data.get(i).unwrap_or(&0) as i32;
-    let n = a.data.len().max(b.data.len());
-    Sample::from_i16((0..n).map(|i| (at(&a, i) + at(&b, i)).clamp(-32768, 32767) as i16).collect())
-}
-
-fn hash(x: i32, y: i32, seed: u32) -> f32 {
-    let mut h = (x as u32).wrapping_mul(0x8da6_b343) ^ (y as u32).wrapping_mul(0xd816_3841) ^ seed.wrapping_mul(0xcb1a_b31f);
-    h ^= h >> 13;
-    h = h.wrapping_mul(0x5bd1_e995);
-    h ^= h >> 15;
-    (h & 0xff_ffff) as f32 / 16_777_216.0
+    Tune::parse(tune, Wave::Square, 0.14).render().mixed(&Tune::parse(bass, Wave::Triangle, 0.32).render())
 }
 
 fn smooth(t: f32) -> f32 {
@@ -593,7 +582,7 @@ impl Art {
         let sp = [('s', 0x8a8a94), ('d', 0x4e4e58), ('w', 0xd8d8e0), ('k', 0x16161e), ('r', 0xff7040)];
         let head0 = fancy(&head_rows(false), &sp);
         let head1 = fancy(&head_rows(true), &sp);
-        let big = |open: bool| outline(&shade(&scale2x(&scale2x(&Sprite::from_rows(&head_rows(open), &sp)))), 0x100818);
+        let big = |open: bool| Sprite::from_rows(&head_rows(open), &sp).scale2x().scale2x().shaded().outlined(0x100818);
         let ap = [('p', 0xe070a8), ('w', 0xffe0f0), ('k', 0x902050)];
         let amoeba = [
             fancy(&["..pppp..", ".pwppppp", "pppkkppp", "ppkkkkpp", "ppkkkkpp", "pppkkppp", ".pppppp.", "..pppp.."], &ap),
@@ -2072,7 +2061,7 @@ impl Game for Salvo {
         self.draw_land(f);
         if self.mode == Mode::Title {
             f.dim(0.55);
-            fancy_text(f, W / 2, 26 + ((self.time * 2.0).sin() * 4.0) as i32, "SALVO", 10, self.time);
+            f.fancy_text(W / 2, 26 + ((self.time * 2.0).sin() * 4.0) as i32, "SALVO", 10, self.time, (0xffe890, 0xe04010));
             f.text_centered(W / 2, 104, "A TRIBUTE TO GRADIUS", TEXT, true, 2);
             f.text_centered(W / 2, 124, "KONAMI 1985", 0x9090b0, false, 2);
             f.blit_scaled(&self.art.ship, W / 2 - self.art.ship.w * 3 / 2, 140, 3, false);
@@ -2105,7 +2094,7 @@ impl Game for Salvo {
                 f.text_centered(W / 2, 110, "PAUSED", TEXT, true, 3);
             }
             Mode::Clear(_) => {
-                fancy_text(f, W / 2, 80, "STAGE CLEAR", 5, self.time);
+                f.fancy_text(W / 2, 80, "STAGE CLEAR", 5, self.time, (0xffe890, 0xe04010));
                 f.text_centered(W / 2, 128, &format!("BONUS {}", 10000 * (self.stage + 1)), TEXT, true, 2);
             }
             Mode::Over(_) => {
@@ -2166,7 +2155,7 @@ fn crystal(r: i32) -> Sprite {
             px[(y * w + x) as usize] = 0xff00_0000 | c;
         }
     }
-    outline(&Sprite { w, h, px }, 0x0c1830)
+    Sprite { w, h, px }.outlined(0x0c1830)
 }
 
 fn vflip(s: &Sprite) -> Sprite {
@@ -2175,104 +2164,9 @@ fn vflip(s: &Sprite) -> Sprite {
     Sprite { w: s.w, h: s.h, px }
 }
 
-/// A colour made brighter or darker by a factor.
-fn tint(c: Rgb, k: f32) -> Rgb {
-    let (r, g, b) = parts(c);
-    let s = |v: u8| (v as f32 * k).round().clamp(0.0, 255.0) as u8;
-    rgb(s(r), s(g), s(b))
-}
-
-/// The colour `t` of the way from `a` to `b`.
-fn mix(a: Rgb, b: Rgb, t: f32) -> Rgb {
-    let ((ar, ag, ab), (br, bg, bb)) = (parts(a), parts(b));
-    let l = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round().clamp(0.0, 255.0) as u8;
-    rgb(l(ar, br), l(ag, bg), l(ab, bb))
-}
-
-/// Twice the size, with the diagonal steps smoothed (the Scale2x rule).
-fn scale2x(s: &Sprite) -> Sprite {
-    let (w, h) = (s.w, s.h);
-    let at = |x: i32, y: i32| if x < 0 || y < 0 || x >= w || y >= h { 0 } else { s.px[(y * w + x) as usize] };
-    let mut px = vec![0u32; (w * h * 4) as usize];
-    for y in 0..h {
-        for x in 0..w {
-            let (p, a, b, c, d) = (at(x, y), at(x, y - 1), at(x + 1, y), at(x - 1, y), at(x, y + 1));
-            let e0 = if c == a && c != d && a != b { a } else { p };
-            let e1 = if a == b && a != c && b != d { b } else { p };
-            let e2 = if d == c && d != b && c != a { c } else { p };
-            let e3 = if b == d && b != a && d != c { d } else { p };
-            let (i, w2) = ((y * 2 * w * 2 + x * 2) as usize, (w * 2) as usize);
-            px[i] = e0;
-            px[i + 1] = e1;
-            px[i + w2] = e2;
-            px[i + w2 + 1] = e3;
-        }
-    }
-    Sprite { w: w * 2, h: h * 2, px }
-}
-
-/// Light from above and the left: edges facing it lighter, the others darker.
-fn shade(s: &Sprite) -> Sprite {
-    let on = |x: i32, y: i32| x >= 0 && y >= 0 && x < s.w && y < s.h && s.px[(y * s.w + x) as usize] >> 24 != 0;
-    let mut out = s.clone();
-    for y in 0..s.h {
-        for x in 0..s.w {
-            let i = (y * s.w + x) as usize;
-            if s.px[i] >> 24 == 0 { continue; }
-            let k = if !on(x, y - 1) || !on(x - 1, y) { 1.25 } else if !on(x, y + 1) || !on(x + 1, y) { 0.72 } else { 1.0 };
-            out.px[i] = 0xff00_0000 | tint(s.px[i] & 0xff_ffff, k);
-        }
-    }
-    out
-}
-
-/// A one-pixel outline in `c` round the sprite.
-fn outline(s: &Sprite, c: Rgb) -> Sprite {
-    let (w, h) = (s.w + 2, s.h + 2);
-    let on = |x: i32, y: i32| x >= 1 && y >= 1 && x <= s.w && y <= s.h && s.px[((y - 1) * s.w + x - 1) as usize] >> 24 != 0;
-    let mut px = vec![0u32; (w * h) as usize];
-    for y in 0..h {
-        for x in 0..w {
-            px[(y * w + x) as usize] = if on(x, y) {
-                s.px[((y - 1) * s.w + x - 1) as usize]
-            } else if on(x - 1, y) || on(x + 1, y) || on(x, y - 1) || on(x, y + 1) {
-                0xff00_0000 | c
-            } else {
-                0
-            };
-        }
-    }
-    Sprite { w, h, px }
-}
-
 /// A small drawing made ready for the big screen: doubled, lit, outlined.
 fn fancy(rows: &[&str], palette: &[(char, Rgb)]) -> Sprite {
-    outline(&shade(&scale2x(&Sprite::from_rows(rows, palette))), 0x100818)
-}
-
-/// Big letters in a fire gradient, with a light sweeping across them and
-/// a shadow under them.
-fn fancy_text(f: &mut Frame, cx: i32, y: i32, s: &str, scale: i32, time: f32) {
-    let (w, h) = (Frame::text_width(s, true, scale), 7 * scale);
-    let mut m = Frame::new(w + 1, h + 1);
-    m.text_scaled(0, 0, s, WHITE, true, scale);
-    let x0 = cx - w / 2;
-    let lit = |xx: i32, yy: i32| m.get(xx, yy) != BLACK;
-    for yy in 0..h {
-        for xx in 0..w {
-            if lit(xx, yy) { f.put(x0 + xx + scale / 2 + 1, y + yy + scale / 2 + 1, 0x000000); }
-        }
-    }
-    let band = ((time * 0.5).fract() * (w + h) as f32 * 1.6) as i32 - h;
-    for yy in 0..h {
-        for xx in 0..w {
-            if !lit(xx, yy) { continue; }
-            let mut c = mix(0xffe890, 0xe04010, yy as f32 / h as f32);
-            let d = (xx + yy - band).abs();
-            if d < scale * 2 { c = mix(c, WHITE, 1.0 - d as f32 / (scale * 2) as f32); }
-            f.put(x0 + xx, y + yy, c);
-        }
-    }
+    Sprite::from_rows(rows, palette).scale2x().shaded().outlined(0x100818)
 }
 
 /// The game with its sound on and the title tune playing.
@@ -2289,17 +2183,10 @@ fn main() {
     // SALVO_BENCH=<frames> plays that many frames with no terminal and
     // prints the time one takes.
     if let Ok(n) = std::env::var("SALVO_BENCH") {
-        let n: u32 = n.parse().unwrap_or(1000);
         game.start_game();
-        let mut f = Frame::new(W, H);
         let mut input = Input::new();
         input.inject(Key::Space);
-        let t0 = std::time::Instant::now();
-        for _ in 0..n {
-            game.update(&input, 1.0 / 60.0);
-            game.draw(&mut f);
-        }
-        eprintln!("{:.3} ms a frame at {}x{} over {} frames", t0.elapsed().as_secs_f64() * 1000.0 / n as f64, W, H, n);
+        bench(&mut game, &input, Config { width: W, height: H, fps: 60 }, n.parse().unwrap_or(1000));
         return;
     }
     run(&mut salvo(), Config { width: W, height: H, fps: 60 });

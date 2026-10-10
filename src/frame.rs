@@ -19,6 +19,20 @@ pub fn parts(c: Rgb) -> (u8, u8, u8) {
     ((c >> 16) as u8, (c >> 8) as u8, c as u8)
 }
 
+/// A colour between two: `a` at 0, `b` at 1.
+pub fn mix(a: Rgb, b: Rgb, t: f32) -> Rgb {
+    let ((ar, ag, ab), (br, bg, bb)) = (parts(a), parts(b));
+    let l = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round().clamp(0.0, 255.0) as u8;
+    rgb(l(ar, br), l(ag, bg), l(ab, bb))
+}
+
+/// A colour made brighter (`k` above 1) or darker (below 1).
+pub fn tint(c: Rgb, k: f32) -> Rgb {
+    let (r, g, b) = parts(c);
+    let s = |v: u8| (v as f32 * k).round().clamp(0.0, 255.0) as u8;
+    rgb(s(r), s(g), s(b))
+}
+
 pub struct Frame {
     pub w: i32,
     pub h: i32,
@@ -140,6 +154,32 @@ impl Frame {
         self.text_scaled(cx - w / 2, y, s, c, big, scale);
     }
 
+    /// Big text for a title, centred on a column: `colors.0` at the top
+    /// fading to `colors.1` at the bottom, a black shadow under it, and a
+    /// white gleam that sweeps across every two seconds of `time`.
+    pub fn fancy_text(&mut self, cx: i32, y: i32, s: &str, scale: i32, time: f32, colors: (Rgb, Rgb)) {
+        let (w, h) = (Frame::text_width(s, true, scale), 7 * scale);
+        let mut m = Frame::new(w + 1, h + 1);
+        m.text_scaled(0, 0, s, WHITE, true, scale);
+        let x0 = cx - w / 2;
+        let lit = |xx: i32, yy: i32| m.get(xx, yy) != BLACK;
+        for yy in 0..h {
+            for xx in 0..w {
+                if lit(xx, yy) { self.put(x0 + xx + scale / 2 + 1, y + yy + scale / 2 + 1, BLACK); }
+            }
+        }
+        let band = ((time * 0.5).fract() * (w + h) as f32 * 1.6) as i32 - h;
+        for yy in 0..h {
+            for xx in 0..w {
+                if !lit(xx, yy) { continue; }
+                let mut c = mix(colors.0, colors.1, yy as f32 / h as f32);
+                let d = (xx + yy - band).abs();
+                if d < scale * 2 { c = mix(c, WHITE, 1.0 - d as f32 / (scale * 2) as f32); }
+                self.put(x0 + xx, y + yy, c);
+            }
+        }
+    }
+
     /// A filled circle.
     pub fn circle(&mut self, cx: i32, cy: i32, r: i32, c: Rgb) {
         for dy in -r..=r {
@@ -194,6 +234,26 @@ mod tests {
         assert_eq!(f.get(1, 1), WHITE);
         assert_eq!(f.get(2, 2), BLACK);
         assert_eq!(f.px.iter().filter(|&&p| p == WHITE).count(), 4);
+    }
+
+    #[test]
+    fn colours_mix_and_tint() {
+        assert_eq!(mix(0x000000, 0xffffff, 0.0), 0x000000);
+        assert_eq!(mix(0x000000, 0xffffff, 1.0), 0xffffff);
+        assert_eq!(mix(0x102030, 0x304050, 0.5), 0x203040);
+        assert_eq!(tint(0x406080, 0.5), 0x203040);
+        assert_eq!(tint(0x808080, 4.0), 0xffffff, "a channel stops at full");
+    }
+
+    #[test]
+    fn fancy_text_fades_from_top_to_bottom_over_a_shadow() {
+        let mut f = Frame::new(60, 20);
+        f.clear(0x00ff00);
+        f.fancy_text(30, 2, "HI", 2, 0.9, (0xff0000, 0x0000ff));
+        let col = (0..60).find(|&x| f.get(x, 2) != 0x00ff00).expect("the top row of the text is drawn");
+        assert_eq!(f.get(col, 2), 0xff0000, "the top row has the first colour");
+        assert!(f.px.iter().any(|&p| p == BLACK), "and a shadow lies under it");
+        assert!(f.px.iter().any(|&p| parts(p).2 > 200 && parts(p).0 < 60), "the bottom rows near the second colour");
     }
 
     #[test]

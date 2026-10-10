@@ -19,6 +19,7 @@
 //! The music is Korobeiniki, a Russian folk song from the 1860s; the rest
 //! is new.
 
+use funkey::noise::hash;
 use funkey::*;
 use std::collections::VecDeque;
 
@@ -995,7 +996,7 @@ impl Stack {
             let k = if p.age > 0.9 { 1.0 - (p.age - 0.9) / 0.4 } else { 1.0 };
             let c = mix(0x0b0d1a, p.color, k.max(0.0));
             if p.big && p.age < 0.9 {
-                fancy_text(f, W / 2, y, &p.text, 2, self.time);
+                f.fancy_text(W / 2, y, &p.text, 2, self.time, (0xfff0a0, 0xe03a50));
             } else {
                 let w = Frame::text_width(&p.text, true, 1);
                 f.text_scaled(W / 2 - w / 2 + 1, y + 1, &p.text, 0x000000, true, 1);
@@ -1041,7 +1042,7 @@ impl Stack {
         f.rect(x, y, w, 1, GOLD);
         f.rect(x, y + h - 1, w, 1, GOLD);
         let rank = self.board.iter().position(|e| self.score > e.score).unwrap_or(self.board.len()) + 1;
-        fancy_text(f, W / 2, y + 12, if rank == 1 { "NEW HIGH SCORE" } else { "TOP TEN" }, 2, self.time);
+        f.fancy_text(W / 2, y + 12, if rank == 1 { "NEW HIGH SCORE" } else { "TOP TEN" }, 2, self.time, (0xfff0a0, 0xe03a50));
         f.text_centered(W / 2, y + 40, &format!("{}   RANK {}", self.score, rank), TEXT, true, 1);
         f.text_centered(W / 2, y + 60, "YOUR INITIALS", DIM, false, 1);
         for i in 0..3 {
@@ -1070,7 +1071,7 @@ impl Stack {
         f.rect(90, 30, W - 180, 206, 0x07080f);
         f.rect(90, 30, W - 180, 1, 0x5a6aa8);
         f.rect(90, 235, W - 180, 1, 0x5a6aa8);
-        fancy_text(f, W / 2, 44, "STACK", 7, self.time);
+        f.fancy_text(W / 2, 44, "STACK", 7, self.time, (0xfff0a0, 0xe03a50));
         f.text_centered(W / 2, 100, "A TRIBUTE TO TETRIS", TEXT, true, 1);
         f.text_centered(W / 2, 124, &format!("START LEVEL  <  {}  >", self.start_level), GOLD, true, 1);
         f.text_centered(W / 2, 142, "ENTER STARTS   LEFT RIGHT LEVEL   Q QUITS", TEXT, false, 1);
@@ -1206,44 +1207,12 @@ fn backdrop(level: u32) -> Vec<Rgb> {
     px
 }
 
-fn hash(x: i32, y: i32, seed: u32) -> f32 {
-    let mut h = (x as u32).wrapping_mul(0x8da6_b343) ^ (y as u32).wrapping_mul(0xd816_3841) ^ seed.wrapping_mul(0xcb1a_b31f);
-    h ^= h >> 13;
-    h = h.wrapping_mul(0x5bd1_e995);
-    h ^= h >> 15;
-    (h & 0xff_ffff) as f32 / 16_777_216.0
-}
-
 fn mix(a: Rgb, b: Rgb, t: f32) -> Rgb {
     let t = t.clamp(0.0, 1.0);
     let (ar, ag, ab) = parts(a);
     let (br, bg, bb) = parts(b);
     let m = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t) as u8;
     rgb(m(ar, br), m(ag, bg), m(ab, bb))
-}
-
-/// Big letters with a shadow, a warm gradient and a gleam that sweeps across.
-fn fancy_text(f: &mut Frame, cx: i32, y: i32, s: &str, scale: i32, time: f32) {
-    let (w, h) = (Frame::text_width(s, true, scale), 7 * scale);
-    let mut m = Frame::new(w + 1, h + 1);
-    m.text_scaled(0, 0, s, WHITE, true, scale);
-    let x0 = cx - w / 2;
-    let lit = |xx: i32, yy: i32| m.get(xx, yy) != BLACK;
-    for yy in 0..h {
-        for xx in 0..w {
-            if lit(xx, yy) { f.put(x0 + xx + scale / 2 + 1, y + yy + scale / 2 + 1, 0x000000); }
-        }
-    }
-    let band = ((time * 0.5).fract() * (w + h) as f32 * 1.6) as i32 - h;
-    for yy in 0..h {
-        for xx in 0..w {
-            if !lit(xx, yy) { continue; }
-            let mut c = mix(0xfff0a0, 0xe03a50, yy as f32 / h as f32);
-            let d = (xx + yy - band).abs();
-            if d < scale * 2 { c = mix(c, WHITE, 1.0 - d as f32 / (scale * 2) as f32); }
-            f.put(x0 + xx, y + yy, c);
-        }
-    }
 }
 
 /// The game with its sound on and the title tune playing, or playing

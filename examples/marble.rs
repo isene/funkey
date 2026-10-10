@@ -750,21 +750,9 @@ impl View<'_> {
     }
 }
 
-fn synth(secs: f32, mut wave: impl FnMut(f32, f32) -> f32) -> Sample {
-    let rate = funkey::audio::RATE as f32;
-    let mut x = 0x2545_f491u32;
-    Sample::from_i16((0..(secs * rate) as usize).map(|i| {
-        x ^= x << 13; x ^= x >> 17; x ^= x << 5;
-        let r = (x >> 8) as f32 / 8388608.0 - 1.0;
-        (wave(i as f32 / rate, r).clamp(-1.0, 1.0) * 32000.0) as i16
-    }).collect())
-}
-
 /// Two tunes of the same length as one sample, so they never drift apart.
 fn duet(lead: &str, bass: &str) -> Sample {
-    let (a, b) = (Tune::parse(lead, Wave::Square, 0.09).render(), Tune::parse(bass, Wave::Triangle, 0.28).render());
-    let at = |s: &Sample, i: usize| *s.data.get(i).unwrap_or(&0) as i32;
-    Sample::from_i16((0..a.data.len().max(b.data.len())).map(|i| (at(&a, i) + at(&b, i)).clamp(-32768, 32767) as i16).collect())
+    Tune::parse(lead, Wave::Square, 0.09).render().mixed(&Tune::parse(bass, Wave::Triangle, 0.28).render())
 }
 
 const TITLE: [&str; 2] = ["144 e5/8 g5/8 c6/8 g5/8 e5/8 g5/8 c6/4 f5/8 a5/8 c6/8 a5/8 f5/8 a5/8 c6/4 \
@@ -782,17 +770,17 @@ impl Sounds {
         let step = TAU / funkey::audio::RATE as f32;
         // The rumble of a rolling ball: noise with the top taken off.
         let mut low = 0.0f32;
-        let roll = synth(0.6, |_, r| { low += (r - low) * 0.06; low * 2.6 });
+        let roll = Sample::synth(0.6, |_, r| { low += (r - low) * 0.06; low * 2.6 });
         let mut ph = 0.0f32;
-        let land = synth(0.16, |t, r| { ph += step * (150.0 - 500.0 * t).max(50.0); (ph.sin() * 0.7 + r * 0.2) * (-t * 22.0).exp() });
+        let land = Sample::synth(0.16, |t, r| { ph += step * (150.0 - 500.0 * t).max(50.0); (ph.sin() * 0.7 + r * 0.2) * (-t * 22.0).exp() });
         // Glass breaking: a crack, then high notes that ring out.
-        let smash = synth(0.7, |t, r| {
+        let smash = Sample::synth(0.7, |t, r| {
             let ring: f32 = [2100.0f32, 3170.0, 4420.0].iter().map(|hz| (t * hz * TAU).sin()).sum();
             r * 0.7 * (-t * 30.0).exp() + ring * 0.14 * (-t * 7.0).exp()
         });
-        let fizz = synth(0.9, |t, r| r * 0.4 * (1.0 - t / 0.9) * (0.6 + 0.4 * (t * 90.0).sin()));
+        let fizz = Sample::synth(0.9, |t, r| r * 0.4 * (1.0 - t / 0.9) * (0.6 + 0.4 * (t * 90.0).sin()));
         let mut ph = 0.0f32;
-        let daze = synth(0.5, |t, _| { ph += step * (700.0 + 250.0 * (t * 40.0).sin()); ph.sin() * 0.3 * (1.0 - t / 0.5) });
+        let daze = Sample::synth(0.5, |t, _| { ph += step * (700.0 + 250.0 * (t * 40.0).sin()); ph.sin() * 0.3 * (1.0 - t / 0.5) });
         Sounds { title: duet(TITLE[0], TITLE[1]), tune: duet(TUNE[0], TUNE[1]), roll, land, smash, fizz, daze,
             bump: Sample::tone(Wave::Square, 190.0, 0.03, 0.3),
             fall: Sample::sweep(Wave::Sine, 1100.0, 140.0, 0.8, 0.3),
@@ -1348,15 +1336,7 @@ fn main() {
     // MARBLE_BENCH=<frames> plays that many frames by itself with no
     // terminal and prints the time one takes.
     if let Ok(n) = std::env::var("MARBLE_BENCH") {
-        let n: u32 = n.parse().unwrap_or(600);
-        let mut game = Marble::new();
-        let (mut f, input) = (Frame::new(W, H), Input::new());
-        let t0 = std::time::Instant::now();
-        for _ in 0..n {
-            game.update(&input, 1.0 / 60.0);
-            game.draw(&mut f);
-        }
-        eprintln!("{:.2} ms a frame at {}x{} over {} frames", t0.elapsed().as_secs_f64() * 1000.0 / n as f64, W, H, n);
+        bench(&mut Marble::new(), &Input::new(), Config { width: W, height: H, fps: 60 }, n.parse().unwrap_or(600));
         return;
     }
     let mut game = marble();

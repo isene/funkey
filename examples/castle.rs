@@ -13,6 +13,7 @@
 //! `CASTLE_BENCH=100` draws that many frames with no terminal and
 //! prints the time a frame takes.
 
+use funkey::noise::{hash, noise2, ridged, smooth};
 use funkey::*;
 use std::f32::consts::{PI, TAU};
 
@@ -33,51 +34,9 @@ fn sun() -> V3 { V3::new(-0.45, 0.55, -0.70).norm() }
 
 // ─────────────────────────────── noise ───────────────────────────────
 
-fn hash(x: i32, y: i32, seed: u32) -> f32 {
-    let mut h = (x as u32).wrapping_mul(0x8da6b343) ^ (y as u32).wrapping_mul(0xd8163841) ^ seed.wrapping_mul(0xcb1ab31f);
-    h ^= h >> 13; h = h.wrapping_mul(0x5bd1e995); h ^= h >> 15;
-    (h & 0xffffff) as f32 / 16777216.0
-}
-
-fn smooth(t: f32) -> f32 { t * t * (3.0 - 2.0 * t) }
-
-/// Value noise on a lattice that repeats every `px` by `py` cells.
-fn noise2(x: f32, y: f32, px: i32, py: i32, seed: u32) -> f32 {
-    let (xi, yi) = (x.floor() as i32, y.floor() as i32);
-    let (fx, fy) = (smooth(x - xi as f32), smooth(y - yi as f32));
-    let g = |ix: i32, iy: i32| hash(ix.rem_euclid(px), iy.rem_euclid(py), seed);
-    let a = g(xi, yi) + (g(xi + 1, yi) - g(xi, yi)) * fx;
-    let b = g(xi, yi + 1) + (g(xi + 1, yi + 1) - g(xi, yi + 1)) * fx;
-    a + (b - a) * fy
-}
-
-fn noise(x: f32, y: f32, period: i32, seed: u32) -> f32 { noise2(x, y, period, period, seed) }
-
 /// Layers of noise, each twice as fine and half as tall. Repeats every
 /// 8 units.
-fn fbm(x: f32, y: f32, octaves: u32, seed: u32) -> f32 {
-    let (mut sum, mut amp, mut freq, mut norm) = (0.0, 0.5, 1.0, 0.0);
-    for o in 0..octaves {
-        sum += noise(x * freq, y * freq, 8 << o, seed + o) * amp;
-        norm += amp;
-        amp *= 0.5;
-        freq *= 2.0;
-    }
-    sum / norm
-}
-
-/// Ridges: noise folded over, for mountains.
-fn ridged(x: f32, y: f32, octaves: u32, seed: u32) -> f32 {
-    let (mut sum, mut amp, mut freq, mut norm) = (0.0, 0.5, 1.0, 0.0);
-    for o in 0..octaves {
-        let n = 1.0 - (noise(x * freq, y * freq, 6 << o, seed + o) * 2.0 - 1.0).abs();
-        sum += n * n * amp;
-        norm += amp;
-        amp *= 0.5;
-        freq *= 2.0;
-    }
-    sum / norm
-}
+fn fbm(x: f32, y: f32, octaves: u32, seed: u32) -> f32 { funkey::noise::fbm(x, y, octaves, seed, 8) }
 
 /// Tileable noise over a texture, `u` and `v` in 0..1.
 fn tnoise(u: f32, v: f32, octaves: u32, seed: u32) -> f32 { fbm(u * 8.0, v * 8.0, octaves, seed) }
@@ -1002,11 +961,8 @@ fn main() {
     let mut game = Castle::new();
     if let Ok(n) = std::env::var("CASTLE_BENCH") {
         let n: u32 = n.parse().unwrap_or(100);
-        let mut f = Frame::new(W, H);
-        let input = Input::new();
-        let t0 = std::time::Instant::now();
-        for _ in 0..n { game.update(&input, 1.0 / 30.0); game.draw(&mut f); }
-        eprintln!("{:.2} ms a frame at {}x{} over {} frames ({:.1} ms of it painting)", t0.elapsed().as_secs_f64() * 1000.0 / n as f64, W, H, n, game.paint_ms / n as f64);
+        let f = bench(&mut game, &Input::new(), Config { width: W, height: H, fps: 30 }, n);
+        eprintln!("{:.1} ms of a frame is painting", game.paint_ms / n as f64);
         if let Ok(p) = std::env::var("FUNKEY_SHOT") { let _ = std::fs::write(p, f.to_ppm()); }
         return;
     }

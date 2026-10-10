@@ -131,6 +131,25 @@ impl Sample {
         Sample::from_i16(out)
     }
 
+    /// A sound from a formula: `wave(t, r)` gives the level, -1 to 1, at
+    /// `t` seconds, and `r` is fresh noise, -1 to 1, for a hiss or a bang.
+    pub fn synth(secs: f32, mut wave: impl FnMut(f32, f32) -> f32) -> Sample {
+        let rate = RATE as f32;
+        let mut x = 0x2545_f491u32;
+        Sample::from_i16((0..(secs * rate) as usize).map(|i| {
+            x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+            let r = (x >> 8) as f32 / 8388608.0 - 1.0;
+            (wave(i as f32 / rate, r).clamp(-1.0, 1.0) * 32000.0) as i16
+        }).collect())
+    }
+
+    /// Two samples at the same time: a tune over its bass.
+    pub fn mixed(&self, other: &Sample) -> Sample {
+        let at = |s: &Sample, i: usize| *s.data.get(i).unwrap_or(&0) as i32;
+        let n = self.data.len().max(other.data.len());
+        Sample::from_i16((0..n).map(|i| (at(self, i) + at(other, i)).clamp(-32768, 32767) as i16).collect())
+    }
+
     /// Two samples one after the other.
     pub fn then(&self, next: &Sample) -> Sample {
         let mut d = (*self.data).clone();

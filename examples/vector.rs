@@ -373,18 +373,6 @@ fn roster(level: u32) -> Vec<Kind> {
     all
 }
 
-/// A sound made a sample at a time: the time in seconds and a random
-/// number from -1 to 1 go in, the loudness from -1 to 1 comes out.
-fn synth(secs: f32, mut wave: impl FnMut(f32, f32) -> f32) -> Sample {
-    let rate = funkey::audio::RATE as f32;
-    let mut x = 0x2545_f491u32;
-    Sample::from_i16((0..(secs * rate) as usize).map(|i| {
-        x ^= x << 13; x ^= x >> 17; x ^= x << 5;
-        let r = (x >> 8) as f32 / 8388608.0 - 1.0;
-        (wave(i as f32 / rate, r).clamp(-1.0, 1.0) * 32000.0) as i16
-    }).collect())
-}
-
 const LEAD: &str = "132 e5/1 g5/1 f#5/1 d#5/2 b4/2";
 const ARP: &str = "132 e3/8 b3/8 e4/8 b3/8 g3/8 b3/8 e4/8 b3/8 c3/8 g3/8 c4/8 g3/8 e3/8 g3/8 c4/8 g3/8 \
     d3/8 a3/8 d4/8 a3/8 f#3/8 a3/8 d4/8 a3/8 b2/8 f#3/8 b3/8 f#3/8 d#3/8 f#3/8 b3/8 f#3/8";
@@ -400,18 +388,18 @@ impl Sounds {
         let at = |s: &Sample, i: usize| *s.data.get(i).unwrap_or(&0) as i32;
         let title = Sample::from_i16((0..a.data.len().max(b.data.len())).map(|i| (at(&a, i) + at(&b, i)).clamp(-32768, 32767) as i16).collect());
         let mut ph = 0.0f32;
-        let boom = synth(0.22, |t, r| { ph += step * (320.0 - 1100.0 * t).max(40.0); (r * 0.7 + ph.sin() * 0.5) * (-t * 14.0).exp() });
+        let boom = Sample::synth(0.22, |t, r| { ph += step * (320.0 - 1100.0 * t).max(40.0); (r * 0.7 + ph.sin() * 0.5) * (-t * 14.0).exp() });
         // The claw's end: a tone that falls a long way, breaking up.
         let mut ph = 0.0f32;
-        let death = synth(1.3, |t, r| {
+        let death = Sample::synth(1.3, |t, r| {
             ph += step * (60.0 + 800.0 * (1.0 - t / 1.3).powi(2));
             (ph.sin().signum() * 0.45 + r * 0.35) * (1.0 - t / 1.3)
         });
         let mut ph = 0.0f32;
-        let zap = synth(0.6, |t, r| { ph += step * (2400.0 - 3600.0 * t).max(180.0); (ph.sin() * 0.5 + r * 0.5) * (1.0 - t / 0.6) });
+        let zap = Sample::synth(0.6, |t, r| { ph += step * (2400.0 - 3600.0 * t).max(180.0); (ph.sin() * 0.5 + r * 0.5) * (1.0 - t / 0.6) });
         // The flight down: a tone that climbs.
         let mut ph = 0.0f32;
-        let warp = synth(1.7, |t, _| { ph += step * (150.0 + 1500.0 * (t / 1.7).powi(2)); ph.sin() * 0.45 * (t * 8.0).min(1.0) * (1.0 - t / 1.7).sqrt() });
+        let warp = Sample::synth(1.7, |t, _| { ph += step * (150.0 + 1500.0 * (t / 1.7).powi(2)); ph.sin() * 0.45 * (t * 8.0).min(1.0) * (1.0 - t / 1.7).sqrt() });
         Sounds { title, boom, death, zap, warp,
             fire: Sample::sweep(Wave::Square, 1500.0, 400.0, 0.07, 0.22),
             shot: Sample::sweep(Wave::Triangle, 250.0, 700.0, 0.12, 0.3),
@@ -1218,15 +1206,7 @@ fn main() {
     // VECTOR_BENCH=<frames> plays that many frames by itself with no
     // terminal and prints the time one takes.
     if let Ok(n) = std::env::var("VECTOR_BENCH") {
-        let n: u32 = n.parse().unwrap_or(600);
-        let mut game = Vector::new();
-        let (mut f, input) = (Frame::new(W, H), Input::new());
-        let t0 = std::time::Instant::now();
-        for _ in 0..n {
-            game.update(&input, 1.0 / 60.0);
-            game.draw(&mut f);
-        }
-        eprintln!("{:.2} ms a frame at {}x{} over {} frames", t0.elapsed().as_secs_f64() * 1000.0 / n as f64, W, H, n);
+        bench(&mut Vector::new(), &Input::new(), Config { width: W, height: H, fps: 60 }, n.parse().unwrap_or(600));
         return;
     }
     run(&mut vector(), Config { width: W, height: H, fps: 60 });
