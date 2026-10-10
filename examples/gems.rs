@@ -338,7 +338,7 @@ impl Gems {
             bear: (0.5, 0.5), bear_h: 0.0, jump: 0.0, face_left: false, walking: 0.0,
             bear_field: Vec::new(), bear_cell: (-1, -1), gem_field: Vec::new(), gems_changed: true,
             took_any: false, last_bonus: 0, note: None,
-            score: 0, high: funkey::store::high_score(GAME), lives: 4, next_life: 25000, mode: Mode::Title,
+            score: 0, high: funkey::scores::best(GAME), lives: 4, next_life: 25000, mode: Mode::Title,
             time: 0.0, wave_time: 0.0, gem_step: 0, gem_clock: 0.0,
             rng: Rng::from_time(), particles: Particles::new(), audio: Audio::off(),
             s_gem,
@@ -949,7 +949,7 @@ impl Game for Gems {
                 else {
                     self.lives -= 1;
                     if self.lives == 0 {
-                        if funkey::store::record_score(GAME, self.score) { self.high = self.score; }
+                        if funkey::scores::record(GAME, self.score) { self.high = self.score; }
                         self.mode = Mode::Over(4.0);
                     } else { self.respawn(); self.mode = Mode::Play; }
                 }

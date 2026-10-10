@@ -50,6 +50,9 @@ pub struct Input {
     /// True on a tick when the window stopped being the one in front.
     /// Only a terminal with focus reports says so.
     pub blurred: bool,
+    /// True while the engine asks for text (the initials for a score):
+    /// keys are typed then, not held.
+    pub(crate) typing: bool,
     /// True once the terminal has reported a release or a repeat: from
     /// then on a key is held exactly, from its press to its release.
     exact: bool,
@@ -115,6 +118,11 @@ impl Input {
     #[cfg(feature = "term")]
     fn key_event(&mut self, name: &str, state: KeyState, now: f64) {
         let Some(key) = key_from_name(name) else { return };
+        // Typed text: every press and every repeat is a key of its own.
+        if self.typing {
+            if !matches!(state, KeyState::Released) { self.pressed.push(key); }
+            return;
+        }
         match state {
             KeyState::Released => { self.exact = true; self.held.remove(&key); }
             KeyState::Repeated => {
@@ -297,6 +305,28 @@ mod tests {
         assert!(i.blurred && i.resized);
         i.begin();
         assert!(!i.blurred && !i.resized, "both are true for one tick only");
+    }
+
+    #[test]
+    fn typed_keys_count_one_by_one() {
+        let mut i = Input::new();
+        let t = clock();
+        // In play a second press right after the first is the key held.
+        i.take("UP", KeyState::Pressed, t);
+        i.begin();
+        i.take("UP", KeyState::Pressed, t + 0.1);
+        assert!(!i.pressed(Key::Up));
+        // Typed, each press and each repeat is a key of its own.
+        i.typing = true;
+        i.begin();
+        i.take("UP", KeyState::Pressed, t + 0.2);
+        assert!(i.pressed(Key::Up));
+        i.begin();
+        i.take("UP", KeyState::Repeated, t + 0.3);
+        assert!(i.pressed(Key::Up));
+        i.begin();
+        i.take("UP", KeyState::Released, t + 0.4);
+        assert!(!i.any_pressed(), "a release types nothing");
     }
 
     #[test]

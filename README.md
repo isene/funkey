@@ -28,7 +28,8 @@ Arrows or WASD move, Space jumps, Up and Down climb a ladder, R restarts, Q quit
 - **Raster**: a software 3D rasterizer. Meshes of flat-shaded triangles, a camera, a depth buffer, fog.
 - `Scene`: textured triangles with a light per corner, `Texture`s that wrap, have holes and shrink into mip levels, `Model` builders for boxes, tubes and cones, sphere culling, fog, a sky through every pixel, and the rows painted on every core at once.
 - **wad and doom**: Doom's WAD files, and the sector renderer that draws a level and the sprites a game hands it.
-- **Rng and store**: seeded random numbers, and high scores kept under `~/.funkey/`.
+- **Rng and store**: seeded random numbers, and values kept under `~/.funkey/`.
+- **scores**: a top ten with initials, as on an arcade cabinet. A game says `scores::record(GAME, score)` when it is over. A score that makes the list has the engine ask for three initials and then show the list. The list is a file under `~/.funkey/`.
 - **run**: a fixed-step loop at the frame rate you ask for. The frame is scaled to the terminal and centred. With `FUNKEY_SCRIPT` set, the same loop runs with no terminal and writes frames, for tests and films. `bench` times a game the same way.
 - **Pause**: a game returns `Flow::Pause` and the engine does the rest. The picture goes dark under the word PAUSED and the sound stops. The game then uses no processor time until a key is pressed. Switch to another window and the engine pauses by itself, where the terminal reports it (glass, kitty and most others).
 
@@ -117,9 +118,9 @@ cargo build --release --target wasm32-unknown-unknown --features eliminator
 Play it at [d6gaming.org](https://d6gaming.org/The_Eliminator_game.html).
 
 A game talks to its page through `funkey::page`: `send` a message out,
-`recv` one back; in a terminal both do nothing. stack uses it for a top
-ten that everyone playing in the page shares, kept by `server/scores.rb`,
-a small CGI script on isene.com.
+`recv` one back; in a terminal both do nothing. The top ten uses it: in a
+page the list is one that everyone playing there shares, kept by
+`server/scores.rb`, a small CGI script on isene.com.
 
 ## Doom
 

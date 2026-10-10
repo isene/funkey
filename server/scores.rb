@@ -4,25 +4,28 @@
 # through fcgiwrap, from cgi-bin/funkey-scores.rb, a link to this file in
 # a checkout of the funkey repo.
 #
-#   GET  funkey-scores.rb?game=stack   the list
-#   POST funkey-scores.rb?game=stack   body "ABC 12345 40 5": initials,
-#                                      score, rows, level; the answer is
-#                                      the list with it
+#   GET  funkey-scores.rb?game=salvo   the list
+#   POST funkey-scores.rb?game=salvo   body "ABC 12345": initials and
+#                                      score; the answer is the list
+#                                      with it
 #
-# A list is a line per score, best first: "ABC 12345 40 5". The lists
+# stack sends its rows and level too: "ABC 12345 40 5".
+#
+# A list is a line per score, best first: "ABC 12345". The lists
 # live in FUNKEY_SCORES (default ~/funkey-scores on the server, writable
 # by www-data), outside the web root; edit a file there to take a score
 # out. One address may send a score every 15 seconds; an IPv6 address
 # counts by its first four groups, the block one home or phone gets.
 #
-# What it touches: the two files in DIR, nothing else. No shell, no eval,
-# no file named by the request: the game is checked against GAMES and
-# every line against one pattern before it is kept or sent.
+# What it touches: recent.txt and one list for each game in DIR, nothing else.
+# No shell, no eval, no file named by the request: the game is checked
+# against GAMES and every line against one pattern before it is kept or
+# sent.
 
 require "digest"
 
 DIR = ENV["FUNKEY_SCORES"] || File.join(Dir.home, "funkey-scores")
-GAMES = %w[stack].freeze
+GAMES = %w[stack drive eliminator gems invaders jumpman marble salvo vector].freeze
 KEEP = 10
 WAIT = 15
 # More recent addresses than this means a flood: turn scores away.
@@ -42,23 +45,28 @@ def reply(status, body)
   exit
 end
 
-def parse(line)
-  m = line.strip.match(/\A([A-Z]{3}) (\d{1,7}) (\d{1,5}) (\d{1,3})\z/) or return nil
-  [m[1], m[2].to_i, m[3].to_i, m[4].to_i]
+# A line of a list: initials and a score above nothing, and for stack the
+# rows and the level too. Anything else is no score.
+def parse(line, game)
+  shape = game == "stack" ? /\A([A-Z]{3}) ([1-9]\d{0,6}) (\d{1,5}) (\d{1,3})\z/ : /\A([A-Z]{3}) ([1-9]\d{0,6})\z/
+  m = line.strip.match(shape) or return nil
+  [m[1], *m.captures[1..-1].map(&:to_i)]
 end
 
 def text(list)
   list.map { |e| e.join(" ") + "\n" }.join
 end
 
-def read_list(path)
-  File.exist?(path) ? File.readlines(path).map { |l| parse(l) }.compact : []
+def read_list(path, game)
+  File.exist?(path) ? File.readlines(path).map { |l| parse(l, game) }.compact : []
 end
 
-# A score the game could give: the level at most the highest starting level
+# A score stack could give: the level at most the highest starting level
 # plus one for every ten rows, and the points far below what the best play
-# earns for those rows.
-def possible?(score, rows, level)
+# earns for those rows. The other games send no more than their score, so
+# theirs is only held to seven digits.
+def possible?(score, rows = nil, level = nil)
+  return true unless rows
   level.between?(1, 16 + rows / 10) && score <= 3000 * level * (rows + 5) + 20_000
 end
 
@@ -88,18 +96,19 @@ path = File.join(DIR, "#{game}.txt")
 
 case ENV["REQUEST_METHOD"]
 when "GET", "HEAD"
-  reply("200 OK", text(read_list(path)))
+  reply("200 OK", text(read_list(path, game)))
 when "POST"
   len = ENV["CONTENT_LENGTH"].to_i
   reply("413 Payload Too Large", "Too long.\n") if len > 64
-  reply("400 Bad Request", "Send: ABC 12345 40 5\n") if len < 1
-  entry = parse($stdin.read(len).to_s)
-  reply("400 Bad Request", "Send: ABC 12345 40 5\n") unless entry
-  reply("400 Bad Request", "The game cannot give that score.\n") unless possible?(*entry[1..3])
+  shape = game == "stack" ? "Send: ABC 12345 40 5\n" : "Send: ABC 12345\n"
+  reply("400 Bad Request", shape) if len < 1
+  entry = parse($stdin.read(len).to_s, game)
+  reply("400 Bad Request", shape) unless entry
+  reply("400 Bad Request", "The game cannot give that score.\n") unless possible?(*entry[1..-1])
   reply("429 Too Many Requests", "One score every #{WAIT} seconds.\n") unless allowed?
   File.open(path, File::RDWR | File::CREAT, 0o664) do |f|
     f.flock(File::LOCK_EX)
-    list = f.read.lines.map { |l| parse(l) }.compact
+    list = f.read.lines.map { |l| parse(l, game) }.compact
     list << entry
     # Best first; of two equal scores the older stays above.
     list = list.each_with_index.sort_by { |e, i| [-e[1], i] }.map(&:first).first(KEEP)

@@ -79,7 +79,7 @@ impl Invaders {
             alive: [[true; COLS]; ROWS], fx: 24.0, fy: 48.0, dir: 1.0, step_timer: 0.0, frame: false,
             player_x: (W / 2 - 6) as f32, shot: None, bombs: Vec::new(), bomb_timer: 1.5, shields: Vec::new(),
             ufo: None, ufo_timer: 18.0, ufo_hit: None, booms: Vec::new(),
-            score: 0, high: funkey::store::high_score(GAME), lives: 3, wave: 1, mode: Mode::Title, time: 0.0, beat: 0,
+            score: 0, high: funkey::scores::best(GAME), lives: 3, wave: 1, mode: Mode::Title, time: 0.0, beat: 0,
             rng: Rng::from_time(), audio,
             inv, player, ufo_s, boom_s, shield: shield.clone(), cannon_boom,
             s_shoot: Sample::sweep(Wave::Square, 900.0, 250.0, 0.1, 0.3),
@@ -290,7 +290,7 @@ impl Game for Invaders {
                     self.bombs.clear();
                     self.shot = None;
                     if self.lives == 0 {
-                        if funkey::store::record_score(GAME, self.score) { self.high = self.score; }
+                        if funkey::scores::record(GAME, self.score) { self.high = self.score; }
                         self.mode = Mode::Over(5.0);
                     } else { self.player_x = (W / 2 - 6) as f32; self.mode = Mode::Play; }
                 }

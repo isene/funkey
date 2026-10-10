@@ -7,6 +7,7 @@
 //! the sound from `fk_sound`. Messages between the game and the page (see
 //! `page`) go out through `fk_out` and come in through `fk_in`.
 
+use crate::scores::{self, Ask, Step};
 use crate::{audio, Config, Flow, Frame, Game, Input, Key};
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -25,6 +26,20 @@ struct Web {
     sound: Vec<f32>,
     /// True from a `Flow::Pause` until the next key goes down.
     paused: bool,
+    /// The screen that asks for initials, while a top-ten score waits.
+    ask: Option<Ask>,
+}
+
+impl Web {
+    /// The frame as the bytes the page paints.
+    fn show(&mut self) -> bool {
+        for (p, o) in self.frame.px.iter().zip(self.rgba.chunks_exact_mut(4)) {
+            o[0] = (p >> 16) as u8;
+            o[1] = (p >> 8) as u8;
+            o[2] = *p as u8;
+        }
+        true
+    }
 }
 
 thread_local! {
@@ -88,7 +103,7 @@ pub fn start(seed: u32, make: fn() -> Box<dyn Game>, cfg: Config) {
     let game = make();
     let rgba = vec![255; (cfg.width * cfg.height * 4) as usize];
     let frame = Frame::new(cfg.width, cfg.height);
-    let web = Web { make, game, cfg, frame, input: Input::new(), rgba, last: -1.0, left: 0.0, pcm: Vec::new(), sound: Vec::new(), paused: false };
+    let web = Web { make, game, cfg, frame, input: Input::new(), rgba, last: -1.0, left: 0.0, pcm: Vec::new(), sound: Vec::new(), paused: false, ask: None };
     WEB.with(|w| *w.borrow_mut() = Some(web));
 }
 
@@ -124,6 +139,32 @@ pub fn frame(ms: f64) -> bool {
             }
             return false;
         }
+        // A top-ten score: the game stands still behind the initials and
+        // the list, and a picture is painted only when a key changed it
+        // or the shared list came.
+        let heard = scores::hear();
+        if let Some(ask) = w.ask.as_mut() {
+            let step = ask.keys(&w.input);
+            w.input.clear_pressed();
+            if step == Step::Done {
+                w.ask = None;
+                w.input.release_all();
+                (w.last, w.left) = (now, 0.0);
+                return false;
+            }
+            if step == Step::Same && !heard { return false; }
+            ask.draw(&mut w.frame);
+            return w.show();
+        }
+        if let Some((name, score)) = scores::due() {
+            w.game.draw(&mut w.frame);
+            w.frame.dim(0.45);
+            let ask = Ask::open(&name, score, &w.frame);
+            ask.draw(&mut w.frame);
+            w.ask = Some(ask);
+            w.input.clear_pressed();
+            return w.show();
+        }
         if w.last < 0.0 { w.last = now; }
         w.left += (now - w.last).clamp(0.0, 0.25);
         w.last = now;
@@ -140,12 +181,7 @@ pub fn frame(ms: f64) -> bool {
         }
         if ticks == 0 { return false; }
         if w.paused { w.game.draw_paused(&mut w.frame) } else { w.game.draw(&mut w.frame) }
-        for (p, o) in w.frame.px.iter().zip(w.rgba.chunks_exact_mut(4)) {
-            o[0] = (p >> 16) as u8;
-            o[1] = (p >> 8) as u8;
-            o[2] = *p as u8;
-        }
-        true
+        w.show()
     })
 }
 

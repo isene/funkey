@@ -579,7 +579,7 @@ impl Eliminator {
             vis: vec![false; (MW * MH) as usize], dist: vec![i32::MAX; (MW * MH) as usize], tex: Vec::new(),
             foes: Vec::new(), loot: Vec::new(), traps: Vec::new(), p, turn: 0, log: VecDeque::new(), tray_head: String::new(),
             tray: Vec::new(), floats: Vec::new(), banner: None, rng: Rng::from_time(), particles: Particles::new(), time: 0.0,
-            hold: 0.0, high: funkey::store::high_score(GAME), audio: Audio::off(), s: sounds(), art: art(), help_page: 0, intro: Intro::default(),
+            hold: 0.0, high: funkey::scores::best(GAME), audio: Audio::off(), s: sounds(), art: art(), help_page: 0, intro: Intro::default(),
         };
         g.particles.gravity = 60.0;
         g.build(0);
@@ -1054,7 +1054,7 @@ impl Eliminator {
         if matches!(self.mode, Mode::Dead(_)) { return; }
         self.say(&format!("{}. The Eliminator claims another.", how), RED);
         let score = self.score();
-        if funkey::store::record_score(GAME, score) { self.high = score; }
+        if funkey::scores::record(GAME, score) { self.high = score; }
         self.mode = Mode::Dead(0.0);
         self.audio.stop(1);
         self.audio.play(&self.s.die, 1.0);
@@ -1754,7 +1754,7 @@ impl Eliminator {
                 }
                 self.mode = Mode::Won(0.0);
                 let score = self.score();
-                if funkey::store::record_score(GAME, score) { self.high = score; }
+                if funkey::scores::record(GAME, score) { self.high = score; }
                 self.audio.stop(1);
                 self.audio.play(&self.s.won, 1.0);
             }

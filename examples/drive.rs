@@ -74,7 +74,7 @@ impl Drive {
         Drive {
             raster, car, post: Mesh::cuboid(0.5, 1.6, 0.5, 0xf0f0f0), package,
             x: 0.0, z: 0.0, heading: 0.0, speed: 0.0, distance: 0.0, time: 0.0, audio, rng: Rng::from_time(),
-            mode: Mode::Title, level: 0, packages: Vec::new(), time_left: 0.0, score: 0, high: funkey::store::high_score(GAME), last_tick: 0,
+            mode: Mode::Title, level: 0, packages: Vec::new(), time_left: 0.0, score: 0, high: funkey::scores::best(GAME), last_tick: 0,
             s_pick: Sample::sweep(Wave::Triangle, 600.0, 1300.0, 0.14, 0.5),
             s_clear: Tune::parse("190 c5 e5 g5 c6/2 -/8 g5/8 c6/2", Wave::Square, 0.35).render(),
             s_over: Sample::sweep(Wave::Saw, 300.0, 50.0, 0.9, 0.4),
@@ -146,7 +146,7 @@ impl Game for Drive {
                     self.audio.play(&self.s_clear, 1.0);
                 } else if self.time_left <= 0.0 {
                     self.time_left = 0.0;
-                    if funkey::store::record_score(GAME, self.score) { self.high = self.score; }
+                    if funkey::scores::record(GAME, self.score) { self.high = self.score; }
                     self.mode = Mode::Over(4.0);
                     self.audio.play(&self.s_over, 1.0);
                 } else if self.time_left < 10.0 && self.time_left as i32 != self.last_tick {

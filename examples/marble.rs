@@ -852,7 +852,7 @@ impl Marble {
     fn new() -> Marble {
         let mut game = Marble { audio: Audio::off(), snd: Sounds::new(), rng: if cfg!(test) { Rng::new(7) } else { Rng::from_time() },
             mode: Mode::Play, demo: true, auto: false, calm: false, t: 0.0, time: 0.0, score: 0,
-            high: funkey::store::high_score(GAME), start: 0, level: 0, course: course(0), clock: 0.0, ball: Ball::at(0.0, 0.0, 0.0), gone: None,
+            high: funkey::scores::best(GAME), start: 0, level: 0, course: course(0), clock: 0.0, ball: Ball::at(0.0, 0.0, 0.0), gone: None,
             back: 0, safe: 0.0, daze: 0.0, last: [0.0; 3], falling: false, foes: Vec::new(), fx: Vec::new(), pops: Vec::new(), cam: 0.0, at: 0,
             bonus: 0, hum: -1 };
         game.settle();
@@ -927,7 +927,7 @@ impl Marble {
         (self.mode, self.t) = (mode, 0.0);
         self.rumble(0.0);
         self.audio.stop(1);
-        if !cfg!(test) { funkey::store::record_score(GAME, self.score); }
+        if !cfg!(test) { funkey::scores::record(GAME, self.score); }
         if mode == Mode::Over { self.play(|s| &s.over, 0.8); }
     }
 

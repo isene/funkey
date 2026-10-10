@@ -469,7 +469,7 @@ impl Vector {
         let mut game = Vector { mode: Mode::Arrive, demo: true, level: 1, start: 1, web: Web::new(0), zoom: 1.0, lane: 0, pos: 0.5,
             depth: 1.0, steer: 0, repeat: 0.0, cool: 0.0, zaps: 0, zapping: 0.0, zap_tick: 0.0, foes: Vec::new(), pool: Vec::new(), spawn: 0.0,
             retreat: false, shots: Vec::new(), spikes: Vec::new(), fx: Vec::new(), how: How::Shot, warped: false, score: 0,
-            high: funkey::store::high_score(GAME), lives: 3, extra: EXTRA, time: 0.0, timer: 0.0, since: 0.0, flash: 0.0, glow: Glow::new(),
+            high: funkey::scores::best(GAME), lives: 3, extra: EXTRA, time: 0.0, timer: 0.0, since: 0.0, flash: 0.0, glow: Glow::new(),
             rng: Rng::from_time(), audio: Audio::off(), snd: Sounds::new() };
         game.enter(1);
         game
@@ -876,7 +876,7 @@ impl Vector {
         self.lives -= 1;
         if self.lives == 0 {
             (self.mode, self.timer) = (Mode::Over, 0.0);
-            if !cfg!(test) { funkey::store::record_score(GAME, self.score); }
+            if !cfg!(test) { funkey::scores::record(GAME, self.score); }
         } else if self.warped {
             self.enter(self.level + 1);
         } else {

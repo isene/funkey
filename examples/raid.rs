@@ -1160,7 +1160,7 @@ impl Raid {
             x: 0.0, y: 0.0, alt: 0.0, yaw: 0.0, spin: 0.0, speed: 0.0, throttle: 0.0, side: 0.0, climb: 0.0, want: 8.0, pitch: 0.0, bank: 0.0,
             hold: 0.0, steep: false, vel: [0.0; 3], armour: 100.0, lives: 3, rounds: ROUNDS, rockets: ROCKETS, missiles: MISSILES, gun_cool: 0.0, burst: 0,
             pod: false, rocket_cool: 0.0, missile_cool: 0.0, bump: 0.0, rearm: 0.0, lock: None, pad: [0.0; 3], foes: Vec::new(),
-            shots: Vec::new(), fx: Vec::new(), blasts: Vec::new(), score: 0, high: funkey::store::high_score(GAME), kills: 0, bonus: [0; 3],
+            shots: Vec::new(), fx: Vec::new(), blasts: Vec::new(), score: 0, high: funkey::scores::best(GAME), kills: 0, bonus: [0; 3],
             clock: 0.0, time: 0.0, timer: 0.0, note: None, warn: 0, beep: 0.0, flash: 0.0, shake: 0.0, hit: 0.0, crashed: false,
             rng: Rng::from_time(), audio: Audio::off(), snd: Sounds::new(), dirs: vec![(0.0, 1.0); W as usize],
             hzs: vec![0.0; W as usize], tops: vec![VH; W as usize], cols: vec![0; n], deps: vec![f32::INFINITY; n],
@@ -1813,7 +1813,7 @@ impl Raid {
             self.lives = 0;
             self.mode = Mode::Over;
             self.timer = 0.0;
-            if !cfg!(test) { funkey::store::record_score(GAME, self.score); }
+            if !cfg!(test) { funkey::scores::record(GAME, self.score); }
             self.audio.play_on(7, &self.snd.lose, 0.8);
         }
     }

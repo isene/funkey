@@ -43,6 +43,7 @@ pub mod page;
 pub mod particles;
 pub mod raster;
 pub mod rng;
+pub mod scores;
 #[cfg(feature = "term")]
 pub mod screen;
 pub mod sprite;
@@ -176,6 +177,11 @@ pub fn run(game: &mut dyn Game, cfg: Config) {
             next = Instant::now();
             continue;
         }
+        if let Some((name, score)) = scores::due() {
+            ask_initials(game, &mut screen, &mut input, &mut frame, &name, score);
+            next = Instant::now();
+            continue;
+        }
         if updates > 0 {
             game.draw(&mut frame);
             if !(halve && screen.big() && ticks % 2 == 1) { screen.present(&frame); }
@@ -204,6 +210,36 @@ fn wait_for_a_key(game: &mut dyn Game, screen: &mut Screen, input: &mut Input, f
     audio::hush(false);
     // The key that ended the pause is not the game's, and a key let go
     // meanwhile may never have said so.
+    input.release_all();
+}
+
+/// A score for the top ten: the initials are asked for over the game's
+/// picture, then the list is shown. Like the pause, nothing runs
+/// meanwhile but the wait for a key. The sound plays on.
+#[cfg(feature = "term")]
+fn ask_initials(game: &mut dyn Game, screen: &mut Screen, input: &mut Input, frame: &mut Frame, name: &str, score: u32) {
+    game.draw(frame);
+    frame.dim(0.45);
+    let mut ask = scores::Ask::open(name, score, frame);
+    ask.draw(frame);
+    screen.present(frame);
+    input.typing = true;
+    loop {
+        input.wait();
+        if input.resized {
+            screen.resize();
+            screen.present(frame);
+        }
+        match ask.keys(input) {
+            scores::Step::Done => break,
+            scores::Step::Changed => {
+                ask.draw(frame);
+                screen.present(frame);
+            }
+            scores::Step::Same => {}
+        }
+    }
+    input.typing = false;
     input.release_all();
 }
 

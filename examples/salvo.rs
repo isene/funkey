@@ -693,7 +693,7 @@ impl Salvo {
             shots: Vec::new(), bullets: Vec::new(), foes: Vec::new(), caps: Vec::new(), cells: Vec::new(),
             groups: Vec::new(), next_group: 0, dropped: 0, boss: None, boss_on: false, warning: 0.0,
             stars, booms: Vec::new(), white: 0.0,
-            score: 0, high: funkey::store::high_score(GAME), lives: 3, next_life: 20000, mode: Mode::Title, time: 0.0, note: None,
+            score: 0, high: funkey::scores::best(GAME), lives: 3, next_life: 20000, mode: Mode::Title, time: 0.0, note: None,
             rng: Rng::from_time(), particles: Particles::new(), audio: Audio::off(), art: Art::new(),
             m_stage: [duet(TUNE_A, BASS_A), duet(TUNE_B, BASS_B)],
             m_boss: duet(TUNE_BOSS, BASS_BOSS),
@@ -2017,7 +2017,7 @@ impl Game for Salvo {
                 } else {
                     self.lives -= 1;
                     if self.lives == 0 {
-                        if funkey::store::record_score(GAME, self.score) { self.high = self.score; }
+                        if funkey::scores::record(GAME, self.score) { self.high = self.score; }
                         self.mode = Mode::Over(5.0);
                         self.audio.stop(1);
                     } else {

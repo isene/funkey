@@ -205,7 +205,7 @@ impl Jumpman {
             map: Tilemap::from_rows(&LEVELS[0].rows, TILE), level: 0, player: Body::new(0.0, 0.0, 5.0, 10.0),
             face_left: false, climbing: false, hanging: false, fall_from: 0.0, start: (0.0, 0.0), bombs_left: 0,
             bullets: Vec::new(), bullet_timer: 3.0, robots: Vec::new(),
-            score: 0, high: funkey::store::high_score(GAME), bonus: 0.0, lives: 4, mode: Mode::Title, time: 0.0,
+            score: 0, high: funkey::scores::best(GAME), bonus: 0.0, lives: 4, mode: Mode::Title, time: 0.0,
             rng: Rng::from_time(), particles: Particles::new(),
             s_jump: Sample::sweep(Wave::Square, 260.0, 620.0, 0.12, 0.35),
             s_bomb: Sample::tone(Wave::Square, 880.0, 0.05, 0.4).then(&Sample::tone(Wave::Square, 1320.0, 0.09, 0.4)),
@@ -408,7 +408,7 @@ impl Game for Jumpman {
                 else {
                     self.lives -= 1;
                     if self.lives == 0 {
-                        if funkey::store::record_score(GAME, self.score) { self.high = self.score; }
+                        if funkey::scores::record(GAME, self.score) { self.high = self.score; }
                         self.mode = Mode::Over(4.0);
                     } else { self.respawn(); self.mode = Mode::Play; }
                 }
