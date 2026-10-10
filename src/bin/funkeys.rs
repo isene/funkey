@@ -12,7 +12,7 @@ use crust::{Crust, Cursor, Input, Pane, Popup};
 use std::io::Write;
 use std::path::PathBuf;
 
-const VERSION: &str = "1.10";
+const VERSION: &str = "1.11";
 const PAGE: &str = "https://isene.org/funkey/";
 
 struct Game {
@@ -26,6 +26,13 @@ struct Game {
 }
 
 const GAMES: &[Game] = &[
+    Game {
+        name: "chomp",
+        kind: "Maze chase",
+        blurb: "In the spirit of Pac-Man",
+        keys: "The arrows steer: a turn asked for early is taken at the next\nopening. P pauses, Q quits.\n\nEat every dot while four chasers hunt, each in its own way. A\npower dot turns the hunt around for a few seconds. A gem under\nthe house pays extra, twice a level.",
+        shot: include_bytes!("../../docs/img/chomp.png"),
+    },
     Game {
         name: "kart",
         kind: "Kart racer",

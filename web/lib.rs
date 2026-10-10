@@ -56,6 +56,11 @@ mod marble;
 #[allow(dead_code)]
 mod again;
 
+#[cfg(feature = "chomp")]
+#[path = "../examples/chomp.rs"]
+#[allow(dead_code)]
+mod chomp;
+
 #[cfg(feature = "kart")]
 #[path = "../examples/kart.rs"]
 #[allow(dead_code)]

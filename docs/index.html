@@ -100,7 +100,7 @@
     <div class="container">
       <h2>The games</h2>
       <p class="section-intro">
-        Sixteen games come with the engine. Each has its own version, shown on its
+        Seventeen games come with the engine. Each has its own version, shown on its
         title screen and tagged in the repo; the crate version is the engine's.
         Every one runs with <code>cargo run --release --example &lt;name&gt;</code>,
         and with <code>FUNKEY_PIXELS=kitty</code> in glass or kitty for real pixels.
@@ -110,6 +110,26 @@
       </p>
 
       <div class="grid">
+        <div class="card">
+          <img class="shot" src="img/chomp.png" alt="chomp: a yellow muncher in a blue maze of dots, three chasers out in the corridors and one still in its house">
+          <div class="card-head">
+            <div>
+              <h3 class="card-title"><a class="card-link" href="https://github.com/isene/funkey/blob/master/examples/chomp.rs">chomp</a></h3>
+              <div class="card-kind">In the spirit of Pac-Man</div>
+              <div class="card-version">chomp-v1.0</div>
+            </div>
+          </div>
+          <p class="card-desc">
+            A muncher eats the dots of a maze while four chasers hunt it
+            by the arcade's rules. They scatter to their corners and chase
+            by turns. One comes straight for you, one aims ahead, one
+            closes in from the other side, and one loses heart up close.
+            A power dot turns the hunt around for a few seconds.
+            The maze, the art and the sound are new.
+          </p>
+          <pre><span class="cmd">cargo run --release --example chomp</span></pre>
+        </div>
+
         <div class="card">
           <img class="shot" src="img/kart.png" alt="kart: a red and a cyan kart side by side on a grey road, in the long shadow of a tree, with more karts ahead and oaks and birches behind the red and white barrier">
           <div class="card-head">
