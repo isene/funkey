@@ -23,6 +23,8 @@ struct Web {
     left: f64,
     pcm: Vec<i16>,
     sound: Vec<f32>,
+    /// True from a `Flow::Pause` until the next key goes down.
+    paused: bool,
 }
 
 thread_local! {
@@ -86,7 +88,7 @@ pub fn start(seed: u32, make: fn() -> Box<dyn Game>, cfg: Config) {
     let game = make();
     let rgba = vec![255; (cfg.width * cfg.height * 4) as usize];
     let frame = Frame::new(cfg.width, cfg.height);
-    let web = Web { make, game, cfg, frame, input: Input::new(), rgba, last: -1.0, left: 0.0, pcm: Vec::new(), sound: Vec::new() };
+    let web = Web { make, game, cfg, frame, input: Input::new(), rgba, last: -1.0, left: 0.0, pcm: Vec::new(), sound: Vec::new(), paused: false };
     WEB.with(|w| *w.borrow_mut() = Some(web));
 }
 
@@ -112,18 +114,32 @@ pub fn frame(ms: f64) -> bool {
         let mut w = w.borrow_mut();
         let Some(w) = w.as_mut() else { return false };
         let step = 1.0 / w.cfg.fps.max(1) as f64;
+        if w.paused {
+            // Nothing moves and nothing is painted until a key goes down.
+            // That key is not the game's.
+            if w.input.any_pressed() {
+                w.paused = false;
+                w.input.release_all();
+                (w.last, w.left) = (now, 0.0);
+            }
+            return false;
+        }
         if w.last < 0.0 { w.last = now; }
         w.left += (now - w.last).clamp(0.0, 0.25);
         w.last = now;
         let mut ticks = 0;
-        while w.left >= step && ticks < 4 {
-            if w.game.update(&w.input, step as f32) == Flow::Quit { w.game = (w.make)(); }
+        while w.left >= step && ticks < 4 && !w.paused {
+            match w.game.update(&w.input, step as f32) {
+                Flow::Quit => w.game = (w.make)(),
+                Flow::Pause => w.paused = true,
+                Flow::Continue => {}
+            }
             w.input.clear_pressed();
             w.left -= step;
             ticks += 1;
         }
         if ticks == 0 { return false; }
-        w.game.draw(&mut w.frame);
+        if w.paused { w.game.draw_paused(&mut w.frame) } else { w.game.draw(&mut w.frame) }
         for (p, o) in w.frame.px.iter().zip(w.rgba.chunks_exact_mut(4)) {
             o[0] = (p >> 16) as u8;
             o[1] = (p >> 8) as u8;
@@ -144,7 +160,7 @@ pub fn sound(n: u32) -> *const f32 {
         let mut w = w.borrow_mut();
         let Some(w) = w.as_mut() else { return std::ptr::null() };
         w.pcm.resize(n as usize, 0);
-        audio::web_mix(&mut w.pcm);
+        if w.paused { w.pcm.fill(0) } else { audio::web_mix(&mut w.pcm) }
         w.sound.clear();
         w.sound.extend(w.pcm.iter().map(|&s| s as f32 / 32768.0));
         w.sound.as_ptr()

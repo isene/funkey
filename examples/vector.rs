@@ -424,7 +424,6 @@ struct Vector {
     mode: Mode,
     /// The title: the game plays itself under its name.
     demo: bool,
-    paused: bool,
     level: u32,
     /// The level a new game begins with.
     start: u32,
@@ -467,7 +466,7 @@ struct Vector {
 
 impl Vector {
     fn new() -> Vector {
-        let mut game = Vector { mode: Mode::Arrive, demo: true, paused: false, level: 1, start: 1, web: Web::new(0), zoom: 1.0, lane: 0, pos: 0.5,
+        let mut game = Vector { mode: Mode::Arrive, demo: true, level: 1, start: 1, web: Web::new(0), zoom: 1.0, lane: 0, pos: 0.5,
             depth: 1.0, steer: 0, repeat: 0.0, cool: 0.0, zaps: 0, zapping: 0.0, zap_tick: 0.0, foes: Vec::new(), pool: Vec::new(), spawn: 0.0,
             retreat: false, shots: Vec::new(), spikes: Vec::new(), fx: Vec::new(), how: How::Shot, warped: false, score: 0,
             high: funkey::store::high_score(GAME), lives: 3, extra: EXTRA, time: 0.0, timer: 0.0, since: 0.0, flash: 0.0, glow: Glow::new(),
@@ -494,7 +493,7 @@ impl Vector {
 
     /// A new game.
     fn begin(&mut self) {
-        (self.demo, self.paused, self.score, self.lives, self.extra) = (false, false, 0, 3, EXTRA);
+        (self.demo, self.score, self.lives, self.extra) = (false, 0, 3, EXTRA);
         self.fx.clear();
         self.enter(self.start);
         self.audio.stop(1);
@@ -1106,7 +1105,6 @@ impl Vector {
             }
             _ => {}
         }
-        if self.paused { g.centered(CX, 180.0, "PAUSED", 32.0, 0xffffff, 1.1); }
     }
 
     /// The name over the game playing itself.
@@ -1135,8 +1133,7 @@ impl Game for Vector {
             if input.pressed(Key::Left) { self.start = self.start.saturating_sub(1).max(1); }
             if input.pressed(Key::Right) { self.start = (self.start + 1).min(WEBS); }
             if go { self.begin(); return Flow::Continue; }
-        } else if input.pressed(Key::Char('p')) && matches!(self.mode, Mode::Play | Mode::Warp) { self.paused = !self.paused; }
-        if self.paused { return Flow::Continue; }
+        } else if input.pressed(Key::Char('p')) && matches!(self.mode, Mode::Play | Mode::Warp) { return Flow::Pause; }
         let ctl = if self.demo { self.bot() } else {
             let side = |k: Key| input.pressed(k) || input.motion(k);
             Ctl { dir: side(Key::Right) as i32 - side(Key::Left) as i32, fire: input.held(Key::Space),

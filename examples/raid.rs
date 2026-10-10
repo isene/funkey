@@ -1137,7 +1137,7 @@ struct Raid {
     /// 1 while a missile site is taking aim, 2 while a missile flies.
     warn: u8,
     beep: f32, flash: f32, shake: f32, hit: f32,
-    crashed: bool, paused: bool,
+    crashed: bool,
     rng: Rng,
     audio: Audio,
     snd: Sounds,
@@ -1162,7 +1162,7 @@ impl Raid {
             pod: false, rocket_cool: 0.0, missile_cool: 0.0, bump: 0.0, rearm: 0.0, lock: None, pad: [0.0; 3], foes: Vec::new(),
             shots: Vec::new(), fx: Vec::new(), blasts: Vec::new(), score: 0, high: funkey::store::high_score(GAME), kills: 0, bonus: [0; 3],
             clock: 0.0, time: 0.0, timer: 0.0, note: None, warn: 0, beep: 0.0, flash: 0.0, shake: 0.0, hit: 0.0, crashed: false,
-            paused: false, rng: Rng::from_time(), audio: Audio::off(), snd: Sounds::new(), dirs: vec![(0.0, 1.0); W as usize],
+            rng: Rng::from_time(), audio: Audio::off(), snd: Sounds::new(), dirs: vec![(0.0, 1.0); W as usize],
             hzs: vec![0.0; W as usize], tops: vec![VH; W as usize], cols: vec![0; n], deps: vec![f32::INFINITY; n],
             over: vec![f32::INFINITY; n], grad: Vec::new(), stars, order: Vec::new() };
         game.begin(0);
@@ -1218,7 +1218,6 @@ impl Raid {
         self.begin(self.first);
         self.mode = Mode::Brief;
         self.timer = 0.0;
-        self.paused = false;
     }
 
     /// Put the gunship so far from the targets, on the line to its pad.
@@ -2158,8 +2157,8 @@ impl Game for Raid {
                 }
             }
             Mode::Fly | Mode::Won => {
-                if input.pressed(Key::Char('p')) { self.paused = !self.paused; }
-                if !self.paused { self.fly(input, dt); }
+                if input.pressed(Key::Char('p')) { return Flow::Pause; }
+                self.fly(input, dt);
             }
             Mode::Down => self.fall(dt),
             Mode::Debrief => {
@@ -2190,7 +2189,6 @@ impl Game for Raid {
             Mode::Fly | Mode::Won | Mode::Down => {
                 self.hud(f, &eye);
                 self.panel(f, &eye);
-                if self.paused { f.dim(0.5); f.text_centered(cx, 150, "PAUSED", WHITE, true, 3); }
             }
             Mode::Debrief => { f.dim(0.4); self.tally(f); self.panel(f, &eye); }
             Mode::Over => {

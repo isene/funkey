@@ -48,6 +48,7 @@ impl Screen {
     pub fn open() -> Screen {
         Crust::init();
         Crust::enable_key_release();
+        Crust::enable_focus_reports();
         let backend = match std::env::var("FUNKEY_PIXELS").as_deref() {
             Ok("kitty") => Backend::Kitty,
             Ok("blocks") => Backend::HalfBlocks,
@@ -67,8 +68,16 @@ impl Screen {
     /// next one is drawn in full.
     pub fn resize(&mut self) {
         let (c, r) = Crust::terminal_size();
-        self.cols = c.max(1) as i32;
-        self.rows = r.max(1) as i32;
+        self.resize_to(c.max(1) as i32, r.max(1) as i32);
+        if self.fb.is_some() { return; }
+        let mut so = std::io::stdout();
+        let _ = so.write_all(seq::ERASE_ALL.as_bytes());
+        let _ = so.flush();
+    }
+
+    /// Take a new size in cells and forget the last frame.
+    fn resize_to(&mut self, cols: i32, rows: i32) {
+        (self.cols, self.rows) = (cols, rows);
         if let Some(fb) = &self.fb {
             // The display is the screen, pixel for pixel.
             self.w = fb.w as i32;
@@ -79,15 +88,23 @@ impl Screen {
         self.w = self.cols;
         self.h = self.rows * 2;
         self.last = vec![(0xffff_ffff, 0xffff_ffff); (self.cols * self.rows) as usize];
-        let mut so = std::io::stdout();
-        let _ = so.write_all(seq::ERASE_ALL.as_bytes());
-        let _ = so.flush();
     }
 
     /// Show a frame. The frame may be any size; see the module notes.
     pub fn present(&mut self, frame: &Frame) {
         if self.backend == Backend::Screen { return self.present_screen(frame); }
         if self.backend == Backend::Kitty { return self.present_pixels(frame); }
+        self.compose(frame);
+        if self.out.is_empty() { return; }
+        let mut so = std::io::stdout();
+        let _ = so.write_all(self.out.as_bytes());
+        let _ = so.flush();
+    }
+
+    /// What the terminal must be sent to show this frame as half blocks:
+    /// the cells that differ from the last frame and nothing else. A
+    /// frame like the last one leaves `out` empty.
+    fn compose(&mut self, frame: &Frame) {
         let needs_scale = frame.w != self.w || frame.h != self.h;
         if needs_scale { self.scale(frame); }
         // Take the scaled frame out while the cells are read, so the
@@ -122,11 +139,7 @@ impl Screen {
             }
         }
         self.scaled = scaled;
-        if self.out.is_empty() { return; }
-        self.out.push_str(style::RESET);
-        let mut so = std::io::stdout();
-        let _ = so.write_all(self.out.as_bytes());
-        let _ = so.flush();
+        if !self.out.is_empty() { self.out.push_str(style::RESET); }
     }
 
     /// The frame on a bare console: scaled to the screen, keeping its
@@ -223,7 +236,68 @@ impl Drop for Screen {
             let _ = so.write_all(glow::kitty_forget(1).as_bytes());
             let _ = so.flush();
         }
+        Crust::disable_focus_reports();
         Crust::disable_modifier_keys();
         Crust::cleanup();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::WHITE;
+
+    /// A half-block display of `cols` by `rows` cells with no terminal
+    /// behind it. It is never dropped: dropping a screen hands a terminal
+    /// back, and no terminal was taken here.
+    fn display(cols: i32, rows: i32) -> std::mem::ManuallyDrop<Screen> {
+        std::mem::ManuallyDrop::new(Screen { backend: Backend::HalfBlocks, fb: None, cols, rows, w: cols, h: rows * 2,
+            last: vec![(0xffff_ffff, 0xffff_ffff); (cols * rows) as usize], scaled: Frame::new(1, 1), out: String::new(), rgba: Vec::new(), big: false })
+    }
+
+    fn cells(s: &Screen) -> usize { s.out.matches('▀').count() }
+
+    #[test]
+    fn only_the_cells_that_changed_are_sent() {
+        let mut s = display(8, 4);
+        let mut f = Frame::new(8, 8);
+        f.clear(0x102030);
+        s.compose(&f);
+        assert_eq!(cells(&s), 32, "the first frame goes out whole");
+        s.compose(&f);
+        assert!(s.out.is_empty(), "the same frame again costs nothing");
+        f.put(3, 5, WHITE);
+        s.compose(&f);
+        assert_eq!(cells(&s), 1, "one pixel changed: one cell is sent");
+        assert!(s.out.starts_with(&Cursor::at(4, 3)), "and the cursor goes to that cell");
+        s.resize_to(8, 4);
+        s.compose(&f);
+        assert_eq!(cells(&s), 32, "after a resize everything goes out again");
+    }
+
+    #[test]
+    fn a_small_frame_is_scaled_by_a_whole_number_and_centred() {
+        let mut s = display(10, 3);
+        let mut f = Frame::new(2, 2);
+        f.clear(WHITE);
+        s.scale(&f);
+        // 10 by 6 pixels hold the frame three times over: 6 by 6, two
+        // black columns on each side.
+        assert_eq!((s.scaled.w, s.scaled.h), (10, 6));
+        for y in 0..6 {
+            for x in 0..10 { assert_eq!(s.scaled.get(x, y), if (2..8).contains(&x) { WHITE } else { BLACK }, "at {x},{y}"); }
+        }
+    }
+
+    #[test]
+    fn a_big_frame_is_shrunk_to_fit_and_keeps_its_shape() {
+        let mut s = display(10, 5);
+        let mut f = Frame::new(40, 20);
+        f.clear(WHITE);
+        s.scale(&f);
+        // 40 by 20 into 10 by 10: a quarter the size, 10 by 5, in the middle.
+        let lit: Vec<(i32, i32)> = (0..10).flat_map(|y| (0..10).map(move |x| (x, y))).filter(|&(x, y)| s.scaled.get(x, y) == WHITE).collect();
+        assert_eq!(lit.len(), 50);
+        assert!(lit.iter().all(|&(_, y)| (2..7).contains(&y)));
     }
 }

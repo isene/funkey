@@ -812,7 +812,6 @@ struct Marble {
     auto: bool,
     /// No foes, to try a course by itself.
     calm: bool,
-    paused: bool,
     /// Seconds in this mode, and seconds in all.
     t: f32,
     time: f32,
@@ -852,7 +851,7 @@ struct Marble {
 impl Marble {
     fn new() -> Marble {
         let mut game = Marble { audio: Audio::off(), snd: Sounds::new(), rng: if cfg!(test) { Rng::new(7) } else { Rng::from_time() },
-            mode: Mode::Play, demo: true, auto: false, calm: false, paused: false, t: 0.0, time: 0.0, score: 0,
+            mode: Mode::Play, demo: true, auto: false, calm: false, t: 0.0, time: 0.0, score: 0,
             high: funkey::store::high_score(GAME), start: 0, level: 0, course: course(0), clock: 0.0, ball: Ball::at(0.0, 0.0, 0.0), gone: None,
             back: 0, safe: 0.0, daze: 0.0, last: [0.0; 3], falling: false, foes: Vec::new(), fx: Vec::new(), pops: Vec::new(), cam: 0.0, at: 0,
             bonus: 0, hum: -1 };
@@ -870,7 +869,7 @@ impl Marble {
 
     /// The rumble of the rolling marble, louder and higher the faster it goes.
     fn rumble(&mut self, speed: f32) {
-        let step = if self.demo || self.paused { 0 } else { (speed * 2.0) as i32 };
+        let step = if self.demo { 0 } else { (speed * 2.0) as i32 };
         if step == self.hum { return; }
         self.hum = step;
         self.audio.volume(2, (step as f32 / 16.0).min(1.0) * 0.5);
@@ -1273,7 +1272,7 @@ impl Marble {
                 label(f, cx, 160, &format!("SCORE {:06}", self.score), WHITE, 3);
                 if self.score > self.high { label(f, cx, 200, "A NEW HIGH SCORE", GOLD, 2); }
             }
-            Mode::Play => if self.paused { label(f, cx, 150, "PAUSED", WHITE, 4); },
+            Mode::Play => {}
         }
     }
 
@@ -1307,10 +1306,8 @@ impl Game for Marble {
         if self.demo {
             if go { self.begin(); return Flow::Continue; }
         } else if input.pressed(Key::Char('p')) && self.mode == Mode::Play {
-            self.paused = !self.paused;
-            self.rumble(0.0);
+            return Flow::Pause;
         }
-        if self.paused { return Flow::Continue; }
         self.step((input.axis_x() as f32, input.axis_y() as f32), go, dt);
         Flow::Continue
     }

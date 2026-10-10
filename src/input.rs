@@ -47,6 +47,9 @@ pub struct Input {
     held: HashMap<Key, Held>,
     pressed: Vec<Key>,
     pub resized: bool,
+    /// True on a tick when the window stopped being the one in front.
+    /// Only a terminal with focus reports says so.
+    pub blurred: bool,
     /// True once the terminal has reported a release or a repeat: from
     /// then on a key is held exactly, from its press to its release.
     exact: bool,
@@ -61,20 +64,51 @@ impl Input {
     /// Drain everything the terminal has queued. Call once per tick.
     #[cfg(feature = "term")]
     pub fn poll(&mut self) {
+        self.begin();
+        self.drain();
+    }
+
+    /// As `poll`, but asleep until the terminal sends something. For a
+    /// paused game: it costs nothing while nothing happens.
+    #[cfg(feature = "term")]
+    pub fn wait(&mut self) {
+        self.begin();
+        if let Some((name, state)) = crust::input::Input::event_ms(3_600_000) { self.take(&name, state, clock()); }
+        self.drain();
+    }
+
+    #[cfg(feature = "term")]
+    fn begin(&mut self) {
         self.pressed.clear();
-        self.resized = false;
+        (self.resized, self.blurred) = (false, false);
+    }
+
+    /// Everything the terminal has queued right now.
+    #[cfg(feature = "term")]
+    fn drain(&mut self) {
         let now = clock();
         while crust::input::Input::peek_pending() {
             let Some((name, state)) = crust::input::Input::event_ms(0) else { break };
-            if name == "RESIZE" { self.resized = true; continue; }
-            if let Some(f) = &mut self.keylog {
-                use std::io::Write;
-                let what = match state { KeyState::Pressed => "press", KeyState::Repeated => "repeat", KeyState::Released => "release" };
-                let _ = writeln!(f, "{:.3} {} {}", now, if name == " " { "SPACE" } else { &name }, what);
-            }
-            self.key_event(&name, state, now);
+            self.take(&name, state, now);
         }
         self.expire(now);
+    }
+
+    /// One event from the terminal, under crust's name for it.
+    #[cfg(feature = "term")]
+    fn take(&mut self, name: &str, state: KeyState, now: f64) {
+        match name {
+            "RESIZE" => return self.resized = true,
+            "FOCUS_OUT" => return self.blurred = true,
+            "FOCUS_IN" => return self.blurred = false,
+            _ => {}
+        }
+        if let Some(f) = &mut self.keylog {
+            use std::io::Write;
+            let what = match state { KeyState::Pressed => "press", KeyState::Repeated => "repeat", KeyState::Released => "release" };
+            let _ = writeln!(f, "{:.3} {} {}", now, if name == " " { "SPACE" } else { name }, what);
+        }
+        self.key_event(name, state, now);
     }
 
     /// One key event from the terminal, under crust's name for the key.
@@ -244,6 +278,25 @@ mod tests {
         assert!(!i.held(Key::Space), "and so is Space with Ctrl down");
         i.key_event("UP", KeyState::Released, t + 0.4);
         assert!(i.held.is_empty());
+    }
+
+    // The window stops being in front, comes back and is left again: the
+    // last report in a tick is the one that counts.
+    #[cfg(feature = "term")]
+    #[test]
+    fn a_window_left_is_reported_and_is_no_key() {
+        let mut i = Input::new();
+        let t = clock();
+        i.take("FOCUS_OUT", KeyState::Pressed, t);
+        assert!(i.blurred);
+        assert!(!i.any_pressed(), "a focus report is no key press");
+        i.take("FOCUS_IN", KeyState::Pressed, t);
+        assert!(!i.blurred, "back in front within the same tick: nothing to pause for");
+        i.take("FOCUS_OUT", KeyState::Pressed, t);
+        i.take("RESIZE", KeyState::Pressed, t);
+        assert!(i.blurred && i.resized);
+        i.begin();
+        assert!(!i.blurred && !i.resized, "both are true for one tick only");
     }
 
     #[test]

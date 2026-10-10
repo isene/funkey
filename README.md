@@ -18,17 +18,19 @@ Arrows or WASD move, Space jumps, Up and Down climb a ladder, R restarts, Q quit
 
 ## What the engine gives a game
 
-- **Frame**: a pixel framebuffer with rectangles, lines, circles, sprites, two built-in fonts at any scale, and a dim for overlays.
-- **Sprite**: rows of characters and a palette, or a PNG file cut into a sheet. Flipping, scaling, tinting.
+- **Frame**: a pixel framebuffer with rectangles, lines, circles, sprites, two built-in fonts at any scale, and a dim for overlays. `fancy_text` writes a title in two colours with a shadow and a gleam that sweeps across. `mix` and `tint` blend and brighten colours.
+- **Sprite**: rows of characters and a palette, or a PNG file cut into a sheet. Flipping, scaling, tinting. `scale2x` doubles pixel art without the stair steps, `shaded` lights it from the top left, `outlined` draws a line around it.
 - **Input**: keys with a held state. Where the terminal reports releases (glass, kitty), a key is held from press to release. `pressed` for the tick a key went down, `axis_x` and `axis_y` for movement.
 - **Tilemap and Body**: levels as lines of text, solid and one-way tiles, drawn with a camera. Boxes fall, run and stop at walls.
-- **Audio**: samples mixed in the engine and piped to pw-play, paplay or aplay. WAV files, Doom lumps, or made on the spot: tones, slides, noise, and tunes written as notes. Channels that loop, change volume and pitch while they play.
+- **Audio**: samples mixed in the engine and piped to pw-play, paplay or aplay. WAV files, Doom lumps, or made on the spot: tones, slides, noise, and tunes written as notes. Channels that loop, change volume and pitch while they play. `Sample::synth` makes a sound from a formula, and `mixed` lays a tune over its bass.
 - **Particles**: bursts of sparks that fly, fall and fade.
+- **noise**: the same value for the same place every time. Smooth noise that wraps, layers of it for hills and clouds, ridges for mountains.
 - **Raster**: a software 3D rasterizer. Meshes of flat-shaded triangles, a camera, a depth buffer, fog.
 - `Scene`: textured triangles with a light per corner, `Texture`s that wrap, have holes and shrink into mip levels, `Model` builders for boxes, tubes and cones, sphere culling, fog, a sky through every pixel, and the rows painted on every core at once.
 - **wad and doom**: Doom's WAD files, and the sector renderer that draws a level and the sprites a game hands it.
 - **Rng and store**: seeded random numbers, and high scores kept under `~/.funkey/`.
-- **run**: a fixed-step loop at the frame rate you ask for. The frame is scaled to the terminal and centred. With `FUNKEY_SCRIPT` set, the same loop runs with no terminal and writes frames, for tests and films.
+- **run**: a fixed-step loop at the frame rate you ask for. The frame is scaled to the terminal and centred. With `FUNKEY_SCRIPT` set, the same loop runs with no terminal and writes frames, for tests and films. `bench` times a game the same way.
+- **Pause**: a game returns `Flow::Pause` and the engine does the rest. The picture goes dark under the word PAUSED and the sound stops. The game then uses no processor time until a key is pressed. Switch to another window and the engine pauses by itself, where the terminal reports it (glass, kitty and most others).
 
 A game is a type with two methods:
 
@@ -176,7 +178,7 @@ tagged as `<game>-vX.Y`: `doom-v1.0`, `jumpman-v1.1`, `invaders-v1.0`,
 funkey = { version = "0.1", package = "fe2o3-funkey" }
 ```
 
-Set `FUNKEY_PIXELS=kitty` to draw real pixels through the kitty graphics protocol instead of half blocks, in a terminal that has it. Set `FUNKEY_SHOT=/tmp/shot.ppm` to have the engine write the frame to a file twice a second, for screenshots and tests. `FUNKEY_SOUND=0` keeps it quiet. `FUNKEY_KEYLOG=/tmp/keys.log` writes every key event the game receives, with its time, for a terminal where keys stick.
+Set `FUNKEY_PIXELS=kitty` to draw real pixels through the kitty graphics protocol instead of half blocks, in a terminal that has it. Set `FUNKEY_SHOT=/tmp/shot.ppm` to have the engine write the frame to a file twice a second, for screenshots and tests. `FUNKEY_SOUND=0` keeps it quiet. `FUNKEY_SEED=7` gives the same random numbers on every run. `FUNKEY_KEYLOG=/tmp/keys.log` writes every key event the game receives, with its time, for a terminal where keys stick.
 
 `FUNKEY_SCRIPT="right*60,space,-*30"` runs a game with no terminal, feeding those keys for that many ticks, and writes the last frame to `FUNKEY_SHOT`. With `FUNKEY_SHOT_EVERY=1` every frame is written; ffmpeg makes a film of them.
 

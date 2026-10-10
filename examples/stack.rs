@@ -182,7 +182,7 @@ fn sounds() -> Sounds {
 // ------------------------------------------------------------------ the game
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-enum Mode { Title, Play, Paused, Over(f32), Name }
+enum Mode { Title, Play, Over(f32), Name }
 
 /// A line of the top ten.
 #[derive(Clone, Debug, PartialEq)]
@@ -777,19 +777,12 @@ impl Game for Stack {
             }
             Mode::Play => {
                 if quit { self.game_over(); return Flow::Continue; }
-                if pressed('p') { self.mode = Mode::Paused; self.audio.volume(1, 0.15); return Flow::Continue; }
+                if pressed('p') { return Flow::Pause; }
                 self.play(input, dt);
                 let danger = self.top() < HIDDEN + 6;
                 if danger != self.danger && matches!(self.mode, Mode::Play) {
                     self.danger = danger;
                     self.audio.play_loop(1, if danger { &self.s.rush } else { &self.s.calm }, 0.55);
-                }
-            }
-            Mode::Paused => {
-                if quit { self.game_over(); return Flow::Continue; }
-                if pressed('p') || input.pressed(Key::Enter) || input.pressed(Key::Space) {
-                    self.mode = Mode::Play;
-                    self.audio.volume(1, 0.55);
                 }
             }
             Mode::Over(t) => {
@@ -816,6 +809,15 @@ impl Game for Stack {
         Flow::Continue
     }
 
+    /// A stack at rest is not for studying: the well is covered.
+    fn draw_paused(&mut self, f: &mut Frame) {
+        self.draw(f);
+        if self.mode == Mode::Play && !self.demo {
+            f.rect(FX - 2, FY - 2, COLS * CELL + 4, (ROWS - HIDDEN) * CELL + 4, 0x07080f);
+        }
+        pause_veil(f);
+    }
+
     fn draw(&mut self, f: &mut Frame) {
         f.px.copy_from_slice(&self.backdrop);
         self.draw_stars(f);
@@ -830,13 +832,6 @@ impl Game for Stack {
             f.text_centered(W / 2, 4, "DEMO  -  ANY KEY TO PLAY", mix(DIM, GOLD, k), false, 1);
         }
         match self.mode {
-            Mode::Paused => {
-                let (x, y, w, h) = (FX - 2, FY - 2, COLS * CELL + 4, (ROWS - HIDDEN) * CELL + 4);
-                f.rect(x, y, w, h, 0x07080f);
-                f.text_centered(W / 2, 100, "PAUSED", GOLD, true, 2);
-                f.text_centered(W / 2, 124, "P GOES ON", TEXT, false, 1);
-                f.text_centered(W / 2, 134, "Q ENDS THE GAME", DIM, false, 1);
-            }
             Mode::Over(t) if t > 0.9 => self.draw_scores(f, t),
             Mode::Name => self.draw_name(f),
             _ => {}
@@ -1271,6 +1266,25 @@ mod tests {
             }
             assert_eq!(cells(k, 4), cells(k, 0));
         }
+    }
+
+    #[test]
+    fn a_paused_game_hides_the_well() {
+        let mut g = quiet();
+        g.start();
+        let mut p = Input::new();
+        p.inject(Key::Char('p'));
+        assert_eq!(g.update(&p, 1.0 / 60.0), Flow::Pause, "P hands the pause to the engine");
+        for x in 0..COLS as usize { g.grid[ROWS as usize - 1][x] = 1; }
+        // A row of pixels through the blocks at the bottom of the well.
+        let y = FY + (ROWS - HIDDEN) * CELL - CELL / 2;
+        let row = |f: &Frame| (FX..FX + COLS * CELL).map(|x| f.get(x, y)).collect::<Vec<_>>();
+        let mut f = Frame::new(W, H);
+        g.draw(&mut f);
+        assert!(row(&f).iter().any(|&c| c != row(&f)[0]), "in play the blocks show");
+        g.draw_paused(&mut f);
+        assert!(row(&f).iter().all(|&c| c == 0x030306), "paused, the well is one dark cover");
+        assert!(f.px.iter().any(|&c| c == WHITE), "with PAUSED written over the picture");
     }
 
     #[test]

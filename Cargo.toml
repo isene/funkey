@@ -1,6 +1,6 @@
 [package]
 name = "fe2o3-funkey"
-version = "0.6.4"
+version = "0.7.0"
 edition = "2021"
 description = "A game engine for the terminal: pixels as half blocks or real pixels, held keys, a fixed-step loop, sprites, tiles, platformer physics, sound, a Doom renderer and a 3D rasterizer"
 license = "Unlicense"
@@ -17,7 +17,7 @@ default = ["term"]
 term = ["dep:crust", "dep:glow"]
 
 [dependencies]
-crust = { version = "0.1.54", path = "../crust", package = "fe2o3-crust", optional = true }
+crust = { version = "0.1.62", path = "../crust", package = "fe2o3-crust", optional = true }
 glow  = { version = "0.1.28", path = "../glow", package = "fe2o3-glow", optional = true }
 image = { version = "0.25", default-features = false, features = ["png"] }
 

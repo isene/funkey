@@ -520,7 +520,7 @@ fn aim(bullets: &mut Vec<Bullet>, from: (f32, f32), to: (f32, f32), speed: f32, 
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-enum Mode { Title, Play, Paused, Dying(f32), Clear(f32), Over(f32) }
+enum Mode { Title, Play, Dying(f32), Clear(f32), Over(f32) }
 
 struct Art {
     ship: Sprite,
@@ -2007,9 +2007,9 @@ impl Game for Salvo {
                 if input.pressed(Key::Space) || input.pressed(Key::Enter) { self.start_game(); }
             }
             Mode::Play => {
-                if input.pressed(Key::Char('p')) { self.mode = Mode::Paused; } else { self.play(input, dt); }
+                if input.pressed(Key::Char('p')) { return Flow::Pause; }
+                self.play(input, dt);
             }
-            Mode::Paused => if input.pressed(Key::Char('p')) || input.pressed(Key::Space) { self.mode = Mode::Play; },
             Mode::Dying(t) => {
                 let t = t - dt;
                 if t > 0.0 {
@@ -2089,10 +2089,6 @@ impl Game for Salvo {
             f.text_centered(W / 2, 96, "WARNING", 0xff3030, true, 4);
         }
         match self.mode {
-            Mode::Paused => {
-                f.dim(0.5);
-                f.text_centered(W / 2, 110, "PAUSED", TEXT, true, 3);
-            }
             Mode::Clear(_) => {
                 f.fancy_text(W / 2, 80, "STAGE CLEAR", 5, self.time, (0xffe890, 0xe04010));
                 f.text_centered(W / 2, 128, &format!("BONUS {}", 10000 * (self.stage + 1)), TEXT, true, 2);

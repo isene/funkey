@@ -1315,7 +1315,6 @@ struct Kart {
     /// The camera's heading, and the kart it follows.
     cam: f32,
     eye: usize,
-    paused: bool,
     auto: bool,
     flash: f32,
     wrong: f32,
@@ -1339,7 +1338,7 @@ impl Kart {
         let mut game = Kart {
             models: Models::new(&tex), track: Track::build(&PLANS[0], &tex), scene, tex, paint: Paint::new(), shade: Box::new([0; 16384]), spots: [[0.0; 6]; KARTS], class: 1, race: 0, cars: Vec::new(), place: [0; KARTS],
             order: Vec::new(), grid: [0; KARTS], points: [0; KARTS], gained: [0; KARTS], loose: Vec::new(), fx: Vec::new(), crates: Vec::new(), mode: Mode::Title,
-            time: 0.0, clock: 0.0, count: 0.0, timer: 0.0, rev: 0.0, cam: 0.0, eye: 0, paused: false, auto: false, flash: 0.0, wrong: 0.0, note: None, lap_best: 0.0,
+            time: 0.0, clock: 0.0, count: 0.0, timer: 0.0, rev: 0.0, cam: 0.0, eye: 0, auto: false, flash: 0.0, wrong: 0.0, note: None, lap_best: 0.0,
             best: [0, 1, 2, 3].map(|i| kept(format!("lap{i}"))), cups: [0, 1, 2].map(|i| kept(format!("cup{i}")) as u32),
             audio: Audio::off(), snd: Sounds::new(), rng: Rng::from_time(),
         };
@@ -1914,8 +1913,7 @@ impl Game for Kart {
                 }
             }
             Mode::Race => {
-                if input.pressed(Key::Char('p')) { self.paused = !self.paused; }
-                if self.paused { return Flow::Continue; }
+                if input.pressed(Key::Char('p')) { return Flow::Pause; }
                 let me = self.keys(input);
                 self.run(Some(me), dt);
                 // You are in, or everyone else is: the race is over.
@@ -1965,10 +1963,6 @@ impl Game for Kart {
             Mode::Race => {
                 self.hud(f);
                 if self.clock < 1.0 { self.lights(f); }
-                if self.paused {
-                    f.dim(0.5);
-                    ink_mid(f, 170, "PAUSED", TEXT, 4);
-                }
             }
             Mode::Flag => {
                 self.map(f);

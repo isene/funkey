@@ -57,3 +57,26 @@ impl Particles {
 
     pub fn is_empty(&self) -> bool { self.list.is_empty() }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn particles_fly_fall_and_die() {
+        let mut p = Particles::new();
+        p.burst(10.0, 10.0, 20, 50.0, 1.0, 0xff0000);
+        assert_eq!(p.list.len(), 20);
+        assert!(p.list.iter().all(|q| (0.5..=1.0).contains(&q.life)), "each lives half the time to all of it");
+        let mut f = Frame::new(20, 20);
+        p.draw(&mut f, 0, 0);
+        assert_eq!(f.get(10, 10), 0xff0000, "they start where the burst was");
+        let before: f32 = p.list.iter().map(|q| q.vy).sum();
+        p.update(0.1);
+        let after: f32 = p.list.iter().map(|q| q.vy).sum();
+        assert!((after - before - 20.0 * 12.0).abs() < 0.01, "gravity pulls each one down");
+        assert!(p.list.iter().any(|q| q.x != 10.0 || q.y != 10.0));
+        p.update(1.0);
+        assert!(p.is_empty(), "past their time they are gone");
+    }
+}

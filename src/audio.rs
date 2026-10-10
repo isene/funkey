@@ -251,6 +251,18 @@ pub(crate) fn web_mix(out: &mut [i16]) {
     if let Ok(mut v) = WEB.lock() { mix(&mut v, out); }
 }
 
+/// True while the game is paused: every mixer stands still.
+static HUSH: std::sync::Mutex<bool> = std::sync::Mutex::new(false);
+static WAKE: std::sync::Condvar = std::sync::Condvar::new();
+
+/// Stop all sound where it is (`true`), or let it go on from there. A
+/// stopped mixer sleeps, and the player it feeds runs dry and goes quiet.
+#[cfg_attr(not(feature = "term"), allow(dead_code))]
+pub(crate) fn hush(on: bool) {
+    if let Ok(mut h) = HUSH.lock() { *h = on; }
+    WAKE.notify_all();
+}
+
 pub struct Audio { mode: Mode }
 
 impl Audio {
@@ -374,7 +386,7 @@ fn start_player() -> Option<(Sender<Cmd>, Child)> {
     let (tx, rx) = channel::<Cmd>();
     std::thread::Builder::new().name("funkey-audio".into()).spawn(move || {
         let mut voices: Vec<Voice> = Vec::new();
-        let start = Instant::now();
+        let mut start = Instant::now();
         let mut written: usize = 0;
         let mut pcm = [0i16; CHUNK];
         let mut buf = [0u8; CHUNK * 2];
@@ -384,6 +396,16 @@ fn start_player() -> Option<(Sender<Cmd>, Child)> {
                     Ok(cmd) => apply(&mut voices, cmd),
                     Err(TryRecvError::Empty) => break,
                     Err(TryRecvError::Disconnected) => return,
+                }
+            }
+            // Paused: sleep until woken, then count time from now, so the
+            // sound goes on where it stopped and is not rushed to catch up.
+            if let Ok(mut hushed) = HUSH.lock() {
+                if *hushed {
+                    while *hushed {
+                        match WAKE.wait(hushed) { Ok(h) => hushed = h, Err(_) => return }
+                    }
+                    (start, written) = (Instant::now(), 0);
                 }
             }
             // Stay a little ahead of the clock, never seconds ahead.
