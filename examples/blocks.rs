@@ -24,7 +24,7 @@ const W: i32 = 640;
 const H: i32 = 400;
 const GAME: &str = "blocks";
 /// The game's own version; the engine has its own.
-const VERSION: &str = "0.2";
+const VERSION: &str = "0.3";
 
 /// The world's size in blocks: across, up and deep.
 const SX: i32 = 256;
@@ -54,6 +54,9 @@ const SUN: V3 = V3 { x: 0.36, y: 0.80, z: 0.48 };
 /// `FAR` is lost in it and not drawn.
 const FOG: f32 = 85.0;
 const FAR: f32 = 210.0;
+/// Under water the blue closes in at 9 blocks, and past this many
+/// nothing is left to see.
+const DIVE: f32 = 96.0;
 const FOCAL: f32 = W as f32 * 0.78;
 const NEAR: f32 = 0.1;
 /// The clouds lie flat at this height, in squares this wide, and drift
@@ -61,6 +64,8 @@ const NEAR: f32 = 0.1;
 const CLOUDS: f32 = 150.0;
 const PUFF: f32 = 12.0;
 const DRIFT: f32 = 1.5;
+/// How far off a cloud has thinned out to nothing.
+const THIN: f32 = 1400.0;
 
 /// The walker is a box this wide from its middle and this tall, with
 /// eyes near the top.
@@ -437,12 +442,14 @@ impl World {
 
     /// The faces that show in one chunk, lit corner by corner: a corner
     /// is darker where blocks crowd round it, and darker under a roof.
-    fn mesh(&self, cx: i32, cz: i32) -> Model {
-        let mut m = Model::new();
+    fn mesh(&self, cx: i32, cz: i32) -> Chunk {
+        let mut m: [Model; 7] = Default::default();
         for x in cx * CHUNK..(cx + 1) * CHUNK {
             for z in cz * CHUNK..(cz + 1) * CHUNK {
                 let top = (0..SY).rev().find(|&y| self.cells[at(x, y, z)] != AIR).unwrap_or(0);
-                for y in 0..=top {
+                // From the top down: what is seen from above is drawn
+                // first, and the tunnels under it are not painted twice.
+                for y in (0..=top).rev() {
                     let b = self.cells[at(x, y, z)];
                     if b == AIR { continue; }
                     // The top of water lies a little under its block's.
@@ -451,7 +458,12 @@ impl World {
                         let into = [x + n[0], y + n[1], z + n[2]];
                         let next = self.get(into[0], into[1], into[2]);
                         // Hidden by a block, or by more of the same water, leaves or glass.
-                        if !clear(next) || next == b { continue; }
+                        // The top of water lies lower than a block on it, so it shows.
+                        if next == b || !clear(next) && !(b == WATER && f == 0) { continue; }
+                        // A face with water against all of it: the floor of
+                        // the water, or a side with more water above.
+                        let wet = next == WATER && (f == 0 || self.get(into[0], into[1] + 1, into[2]) == WATER);
+                        let side = &mut m[if wet { WET } else { f }];
                         // The two directions that run along the face.
                         let (t1, t2) = if n[0] != 0 { (1, 2) } else if n[1] != 0 { (0, 2) } else { (0, 1) };
                         let mut v = [Vert::new(V3::default(), 0.0, 0.0, 0.0); 4];
@@ -485,14 +497,48 @@ impl World {
                         // Cut the face along the diagonal that keeps one
                         // dark corner in a triangle of its own.
                         let mat = Mat::Tex(skin(b, f));
-                        if v[0].lit[0] + v[2].lit[0] < v[1].lit[0] + v[3].lit[0] { m.quad(v[1], v[2], v[3], v[0], mat); } else { m.quad(v[0], v[1], v[2], v[3], mat); }
+                        if v[0].lit[0] + v[2].lit[0] < v[1].lit[0] + v[3].lit[0] { side.quad(v[1], v[2], v[3], v[0], mat); } else { side.quad(v[0], v[1], v[2], v[3], mat); }
                         // The top of the water is seen from below as well.
-                        if b == WATER && f == 0 { m.quad(v[3], v[2], v[1], v[0], mat); }
+                        if b == WATER && f == 0 { m[WET].quad(v[3], v[2], v[1], v[0], mat); }
                     }
                 }
             }
         }
-        m.bound();
+        for side in &mut m { side.bound(); }
+        let ceiling = m[1].verts.iter().map(|v| v.p.y).fold(f32::NEG_INFINITY, f32::max);
+        Chunk { sides: m, ceiling }
+    }
+}
+
+/// A chunk's faces, one model for each way they look, in the order of
+/// `FACES`, and last the faces that only an eye in the water can see.
+/// A side the eye can not see is then left out whole, and its corners are
+/// never worked out.
+struct Chunk {
+    sides: [Model; 7],
+    /// The highest face that looks down.
+    ceiling: f32,
+}
+
+/// Which of a chunk's sides holds the faces under water. Water is drawn
+/// solid, and every way into it from the air goes through its top or
+/// its sides.
+const WET: usize = 6;
+
+impl Chunk {
+    /// The sides an eye can not see. Six of them it is a block or more
+    /// behind. `x0` and `z0` are the chunk's low corner, and `wet` says
+    /// the eye is in the water or against it.
+    fn away(&self, eye: V3, x0: f32, z0: f32, wet: bool) -> [bool; 7] {
+        let far = CHUNK as f32;
+        [false, eye.y >= self.ceiling + 1.0, eye.z >= z0 + far, eye.z <= z0, eye.x >= x0 + far, eye.x <= x0, !wet]
+    }
+
+    /// All six sides as one model.
+    #[cfg(test)]
+    fn whole(&self) -> Model {
+        let mut m = Model::new();
+        for side in &self.sides { m.extend(side, &M4::identity()); }
         m
     }
 }
@@ -656,7 +702,11 @@ struct Blocks {
     world: World,
     scene: Scene,
     /// A mesh for each chunk, row by row.
-    chunks: Vec<Model>,
+    chunks: Vec<Chunk>,
+    /// The chunks from the nearest to the farthest, and the chunk the
+    /// eye was in when they were put in that order.
+    order: Vec<usize>,
+    ordered: (i32, i32),
     /// The walker, and where it looks.
     me: Body,
     yaw: f32,
@@ -712,7 +762,7 @@ impl Blocks {
             made: Sample::sweep(Wave::Triangle, 520.0, 780.0, 0.09, 0.5),
         };
         let mut b = Blocks {
-            world, scene, chunks: Vec::new(), me: Body { pos: V3::default(), rise: 0.0, grounded: false }, yaw: 0.0, pitch: 0.0, was_wet: false, pick: 0,
+            world, scene, chunks: Vec::new(), order: Vec::new(), ordered: (-1, -1), me: Body { pos: V3::default(), rise: 0.0, grounded: false }, yaw: 0.0, pitch: 0.0, was_wet: false, pick: 0,
             have: [0; 10], pickaxe: false, cats: Vec::new(), coats: COATS.iter().map(|&c| cat(c)).collect(), looking: 0.0, again: 0.0, mode: Mode::Title,
             row: 0, note: (String::new(), 0.0), stored: false, unsaved: false, since: 0.0, time: 0.0, waves: (0..16).map(wave).collect(), wave: 0, icons,
             faded, tool: pickaxe(), rng: Rng::new(1), audio: Audio::off(), snd,
@@ -1123,14 +1173,31 @@ impl Blocks {
 /// The sky along a line of sight: blue overhead and pale at the horizon,
 /// the sun, and flat clouds that drift and thin out far away.
 fn sky(d: V3, eye: V3, time: f32) -> Rgb {
-    let back = if d.dot(SUN) > 0.9985 { 0xfff6d8 } else { mix(HAZE, ZENITH, (d.y.max(0.0) * 1.7).min(1.0)) };
+    let back = if d.dot(SUN) > 0.9985 { 0xfff6d8 } else { mix(HAZE, ZENITH, (d.y * 1.7).clamp(0.0, 1.0)) };
     if d.y < 0.03 { return back; }
-    // Where this line of sight meets the layer the clouds lie in.
+    // Where this line of sight meets the layer the clouds lie in. A
+    // cloud that far off has thinned out to nothing.
     let far = (CLOUDS - eye.y) / d.y;
+    if far >= THIN { return back; }
     let (x, z) = (eye.x + d.x * far + time * DRIFT, eye.z + d.z * far);
-    let (cx, cz) = ((x / PUFF).floor() as i32, (z / PUFF).floor() as i32);
-    if noise(cx as f32 / 5.0, cz as f32 / 5.0, 4096, 60) < 0.56 { return back; }
-    mix(tint(WHITE, 0.93 + hash(cx, cz, 61) * 0.07), back, (far / 1400.0).min(1.0))
+    let square = ((x / PUFF).floor() as i32, (z / PUFF).floor() as i32);
+    // The pixel before this one looked at the same square more often
+    // than not, so its answer is kept.
+    let cloud = PUFFED.with(|last| {
+        let (at, cloud) = last.get();
+        if at == square { return cloud; }
+        let (cx, cz) = square;
+        let cloud = (noise(cx as f32 / 5.0, cz as f32 / 5.0, 4096, 60) >= 0.56).then(|| tint(WHITE, 0.93 + hash(cx, cz, 61) * 0.07));
+        last.set((square, cloud));
+        cloud
+    });
+    match cloud { Some(white) => mix(white, back, far / THIN), None => back }
+}
+
+thread_local! {
+    /// The square of cloud layer last looked at, and the colour of the
+    /// cloud in it, if it has one.
+    static PUFFED: std::cell::Cell<((i32, i32), Option<Rgb>)> = const { std::cell::Cell::new(((i32::MIN, 0), None)) };
 }
 
 impl Game for Blocks {
@@ -1178,12 +1245,31 @@ impl Game for Blocks {
         // Under water the world is near and blue.
         let under = self.world.around(cam.pos.add(V3::new(0.0, 0.125, 0.0))) == WATER;
         self.scene.fog = Some(if under { (DEEP, 9.0) } else { (HAZE, FOG) });
+        // With water against the eye the picture can cut its surface
+        // open, and what lies under it shows.
+        let at = [cam.pos.x.floor() as i32, cam.pos.y.floor() as i32, cam.pos.z.floor() as i32];
+        let soaked = under || (0..27).any(|i| self.world.get(at[0] + i % 3 - 1, at[1] + i / 3 % 3 - 1, at[2] + i / 9 - 1) == WATER);
+        let far = if under { DIVE } else { FAR } + CHUNK as f32;
         self.scene.begin(&cam);
+        // The nearest chunk first: land behind land is then found
+        // hidden before it is painted.
+        let here = ((cam.pos.x / CHUNK as f32).floor() as i32, (cam.pos.z / CHUNK as f32).floor() as i32);
+        if here != self.ordered || self.order.len() != self.chunks.len() {
+            self.order = (0..self.chunks.len()).collect();
+            self.order.sort_by_key(|&i| (i as i32 % ACROSS - here.0).pow(2) + (i as i32 / ACROSS - here.1).pow(2));
+            self.ordered = here;
+        }
         let still = M4::identity();
-        for (i, chunk) in self.chunks.iter().enumerate() {
-            let (cx, cz) = (i as i32 % ACROSS, i as i32 / ACROSS);
-            let (dx, dz) = ((cx * CHUNK + CHUNK / 2) as f32 - cam.pos.x, (cz * CHUNK + CHUNK / 2) as f32 - cam.pos.z);
-            if dx * dx + dz * dz < (FAR + CHUNK as f32) * (FAR + CHUNK as f32) { self.scene.push(chunk, &still); }
+        for &i in &self.order {
+            let (x0, z0) = ((i as i32 % ACROSS * CHUNK) as f32, (i as i32 / ACROSS * CHUNK) as f32);
+            let (dx, dz) = (x0 + (CHUNK / 2) as f32 - cam.pos.x, z0 + (CHUNK / 2) as f32 - cam.pos.z);
+            let off = dx * dx + dz * dz;
+            if off >= far * far { continue; }
+            let chunk = &self.chunks[i];
+            let wet = soaked && off < (DIVE + CHUNK as f32) * (DIVE + CHUNK as f32);
+            for (side, away) in chunk.sides.iter().zip(chunk.away(cam.pos, x0, z0, wet)) {
+                if !away { self.scene.push(side, &still); }
+            }
         }
         for c in &self.cats {
             if c.body.pos.sub(cam.pos).len() < 70.0 { draw_cat(&mut self.scene, &self.coats[c.coat], c); }
@@ -1705,33 +1791,91 @@ mod tests {
     fn a_chunk_shows_only_the_faces_that_can_be_seen() {
         let mut w = flat(1);
         // The floor of one chunk: 256 tops, no sides, no bottoms.
-        assert_eq!(w.mesh(3, 3).tris.len(), 256 * 2);
+        assert_eq!(w.mesh(3, 3).whole().tris.len(), 256 * 2);
         // One block on it adds five faces and hides one.
         w.put([56, 1, 56], STONE);
-        assert_eq!(w.mesh(3, 3).tris.len(), (256 + 5 - 1) * 2);
+        assert_eq!(w.mesh(3, 3).whole().tris.len(), (256 + 5 - 1) * 2);
         // A second beside it: each has four sides and a top to show.
         w.put([57, 1, 56], STONE);
-        assert_eq!(w.mesh(3, 3).tris.len(), (256 + 8 - 2) * 2);
+        assert_eq!(w.mesh(3, 3).whole().tris.len(), (256 + 8 - 2) * 2);
         // Glass hides nothing behind it, and glass on glass has no face between.
         let mut w = flat(1);
         w.put([56, 1, 56], GLASS);
         w.put([56, 2, 56], GLASS);
-        assert_eq!(w.mesh(3, 3).tris.len(), (256 + 4 + 4 + 1) * 2);
+        assert_eq!(w.mesh(3, 3).whole().tris.len(), (256 + 4 + 4 + 1) * 2);
         // Two blocks of water show the floor under them, six sides, and
         // their tops from above and from below.
         let mut w = flat(1);
         w.put([56, 1, 56], WATER);
         w.put([57, 1, 56], WATER);
-        let m = w.mesh(3, 3);
+        let m = w.mesh(3, 3).whole();
         assert_eq!(m.tris.len(), (256 + 6 + 2 * 2) * 2);
         // Those tops lie an eighth under the blocks'.
         assert!(m.verts.iter().any(|v| v.p.y == 1.875) && m.verts.iter().all(|v| v.p.y <= 1.875));
     }
 
     #[test]
+    fn a_side_left_out_has_its_back_to_the_eye() {
+        let w = World::grow(5);
+        let mut left = 0;
+        for eye in [V3::new(128.5, 60.0, 128.5), V3::new(40.2, 37.5, 200.9), V3::new(3.0, 110.0, 250.0), V3::new(200.0, 20.0, 64.0)] {
+            for i in 0..ACROSS * (SZ / CHUNK) {
+                let (cx, cz) = (i % ACROSS, i / ACROSS);
+                let chunk = w.mesh(cx, cz);
+                let away = chunk.away(eye, (cx * CHUNK) as f32, (cz * CHUNK) as f32, true);
+                assert!(!away[0] && !away[WET], "tops are always drawn, and so is the sea floor for an eye in the water");
+                for (side, _) in chunk.sides.iter().zip(away).filter(|s| s.1) {
+                    for (t, _) in &side.tris {
+                        let [a, b, c] = t.map(|k| side.verts[k as usize].p);
+                        let front = b.sub(a).cross(c.sub(a));
+                        assert!(front.dot(a.sub(eye)) > 0.0, "a face in chunk {cx} {cz} looks at the eye at {eye:?}");
+                        left += 1;
+                    }
+                }
+            }
+        }
+        // A sixth of the world's faces and more are left out for an eye.
+        let all: usize = (0..ACROSS * (SZ / CHUNK)).map(|i| w.mesh(i % ACROSS, i / ACROSS).whole().tris.len()).sum();
+        assert!(left * 6 > all * 4, "{left} of {all} four times over");
+    }
+
+    #[test]
+    fn faces_under_water_hide_from_an_eye_in_the_air() {
+        let mut b = Blocks::new(World::grow(5));
+        // Over the sea, two blocks and more from the water, and high over the land.
+        let sea = (8..SX - 8).step_by(31).flat_map(|x| (8..SZ - 8).step_by(31).map(move |z| (x, z))).filter(|&(x, z)| b.world.get(x, SEA - 1, z) == WATER);
+        let mut eyes: Vec<V3> = sea.take(6).map(|(x, z)| V3::new(x as f32 + 0.5, SEA as f32 + 2.5, z as f32 + 0.5)).collect();
+        assert!(eyes.len() > 3, "seed 5 has a sea");
+        eyes.push(V3::new(128.0, 112.0, 128.0));
+        for (i, eye) in eyes.iter().enumerate() {
+            let cam = Cam3 { pos: *eye, yaw: i as f32 * 1.1, pitch: -0.45, focal: FOCAL };
+            let mut paint = |sides: usize| {
+                b.scene.begin(&cam);
+                for chunk in &b.chunks {
+                    for side in &chunk.sides[..sides] { b.scene.push(side, &M4::identity()); }
+                }
+                let mut f = Frame::new(W, H);
+                b.scene.render(&mut f, &|_| 0);
+                f.px
+            };
+            assert!(paint(WET + 1) == paint(WET), "a face under water shows from {eye:?}");
+        }
+        // They are a good part of the world's faces.
+        let (wet, all) = b.chunks.iter().fold((0, 0), |n, c| (n.0 + c.sides[WET].tris.len(), n.1 + c.whole().tris.len()));
+        assert!(wet * 8 > all, "{wet} of {all}");
+        // A block built on the water leaves the water's top under it.
+        let mut w = flat(1);
+        w.put([56, 1, 56], WATER);
+        w.put([56, 2, 56], STONE);
+        let m = w.mesh(3, 3);
+        assert!(m.sides[0].verts.iter().any(|v| v.p.y == 1.875), "the water under the stone has a top");
+        assert_eq!(m.sides[WET].tris.len(), 2 + 2, "the floor under the water, and the water's top from below");
+    }
+
+    #[test]
     fn it_is_darker_under_a_roof_and_in_a_corner() {
         let top_light = |w: &World, x: i32, z: i32| {
-            let m = w.mesh(x / CHUNK, z / CHUNK);
+            let m = w.mesh(x / CHUNK, z / CHUNK).whole();
             let at = |v: &Vert| v.p.y == 1.0 && (x as f32..=x as f32 + 1.0).contains(&v.p.x) && (z as f32..=z as f32 + 1.0).contains(&v.p.z);
             let own: Vec<f32> = m.tris.iter().filter(|(t, _)| t.iter().all(|&i| at(&m.verts[i as usize]))).flat_map(|(t, _)| t.map(|i| m.verts[i as usize].lit[0])).collect();
             own.iter().sum::<f32>() / own.len() as f32
@@ -1760,8 +1904,8 @@ mod tests {
             }
         }
         w.roofs();
-        let mut m = w.mesh(2, 2).verts;
-        m.extend(w.mesh(3, 2).verts);
+        let mut m = w.mesh(2, 2).whole().verts;
+        m.extend(w.mesh(3, 2).whole().verts);
         let green = |x: f32, z: f32| m.iter().find(|v| v.p.y == 11.875 && v.p.x == x && v.p.z == z).map(|v| v.lit[1]).expect("a corner of the water's top");
         let (deep, shelf, shore) = (green(44.0, 48.0), green(52.0, 48.0), green(56.0, 48.0));
         assert!((deep - ABYSS[1]).abs() < 0.001, "{deep}");

@@ -120,6 +120,7 @@ cargo build --release --target wasm32-unknown-unknown --features eliminator
 ```
 
 Play it at [d6gaming.org](https://d6gaming.org/The_Eliminator_game.html).
+Fourteen of the games play at [isene.org/fe2o3/try](https://isene.org/fe2o3/try/funkeys/).
 
 A game talks to its page through `funkey::page`: `send` a message out,
 `recv` one back; in a terminal both do nothing. The top ten uses it: in a
@@ -174,7 +175,7 @@ writes the last frame. `DOOM_BENCH=1` times the renderer.
 The crate version is the engine's and moves only when the engine
 changes. Each game has its own version, shown on its title screen and
 tagged as `<game>-vX.Y`: `doom-v1.0`, `jumpman-v1.1`, `invaders-v1.0`,
-`drive-v1.0`, `soar-v1.1`, `climb-v1.0`, `castle-v1.1`, `gems-v1.3`, `salvo-v1.2`, `eliminator-v1.3`, `stack-v1.1`, `raid-v1.2`, `vector-v1.0`, `marble-v1.0`, `again-v1.0`, `kart-v1.2`, `chomp-v1.0`, `blocks-v0.2`. The picker is `funkeys-v1.13`.
+`drive-v1.0`, `soar-v1.1`, `climb-v1.0`, `castle-v1.1`, `gems-v1.3`, `salvo-v1.2`, `eliminator-v1.3`, `stack-v1.1`, `raid-v1.2`, `vector-v1.0`, `marble-v1.0`, `again-v1.0`, `kart-v1.2`, `chomp-v1.0`, `blocks-v0.3`. The picker is `funkeys-v1.13`.
 
 ## Using it
 

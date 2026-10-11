@@ -22,14 +22,25 @@ pub fn parts(c: Rgb) -> (u8, u8, u8) {
 /// A colour between two: `a` at 0, `b` at 1.
 pub fn mix(a: Rgb, b: Rgb, t: f32) -> Rgb {
     let ((ar, ag, ab), (br, bg, bb)) = (parts(a), parts(b));
-    let l = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round().clamp(0.0, 255.0) as u8;
+    let l = |x: u8, y: u8| level(x as f32 + (y as f32 - x as f32) * t);
     rgb(l(ar, br), l(ag, bg), l(ab, bb))
+}
+
+/// `v` as one part of a colour: the nearest whole number from 0 to 255,
+/// a half going up. It gives what `v.round().clamp(0.0, 255.0) as u8`
+/// gives, with no call into the maths library for each one.
+#[inline]
+fn level(v: f32) -> u8 {
+    if !(v > 0.0) { return 0; }
+    if v >= 255.0 { return 255; }
+    let whole = v as u32;
+    (whole + (v - whole as f32 >= 0.5) as u32) as u8
 }
 
 /// A colour made brighter (`k` above 1) or darker (below 1).
 pub fn tint(c: Rgb, k: f32) -> Rgb {
     let (r, g, b) = parts(c);
-    let s = |v: u8| (v as f32 * k).round().clamp(0.0, 255.0) as u8;
+    let s = |v: u8| level(v as f32 * k);
     rgb(s(r), s(g), s(b))
 }
 

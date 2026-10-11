@@ -65,3 +65,8 @@ mod chomp;
 #[path = "../examples/kart.rs"]
 #[allow(dead_code)]
 mod kart;
+
+#[cfg(feature = "blocks")]
+#[path = "../examples/blocks.rs"]
+#[allow(dead_code)]
+mod blocks;

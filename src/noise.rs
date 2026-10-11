@@ -22,9 +22,11 @@ pub fn noise(x: f32, y: f32, period: i32, seed: u32) -> f32 { noise2(x, y, perio
 pub fn noise2(x: f32, y: f32, px: i32, py: i32, seed: u32) -> f32 {
     let (xi, yi) = (x.floor() as i32, y.floor() as i32);
     let (fx, fy) = (smooth(x - xi as f32), smooth(y - yi as f32));
-    let g = |ix: i32, iy: i32| hash(ix.rem_euclid(px), iy.rem_euclid(py), seed);
-    let a = g(xi, yi) + (g(xi + 1, yi) - g(xi, yi)) * fx;
-    let b = g(xi, yi + 1) + (g(xi + 1, yi + 1) - g(xi, yi + 1)) * fx;
+    // Each of the four grid points round (x, y) is worked out once.
+    let (x0, x1, y0, y1) = (xi.rem_euclid(px), (xi + 1).rem_euclid(px), yi.rem_euclid(py), (yi + 1).rem_euclid(py));
+    let (p, q, r, s) = (hash(x0, y0, seed), hash(x1, y0, seed), hash(x0, y1, seed), hash(x1, y1, seed));
+    let a = p + (q - p) * fx;
+    let b = r + (s - r) * fx;
     a + (b - a) * fy
 }
 

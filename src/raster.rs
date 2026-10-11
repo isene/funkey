@@ -318,12 +318,27 @@ impl Texture {
     /// The texel under (u, v) at a mip level, wrapping. u and v run 0..1
     /// over the picture once.
     #[inline]
-    pub fn texel(&self, level: usize, u: f32, v: f32) -> Rgb {
+    pub fn texel(&self, level: usize, u: f32, v: f32) -> Rgb { self.lod(level).at(u, v) }
+
+    #[inline]
+    fn lod(&self, level: usize) -> Lod<'_> {
         let level = level.min(self.levels.len() - 1);
         let (w, h) = (self.w >> level, self.h >> level);
-        let x = (u * w as f32).floor() as i64 as u32 & (w - 1);
-        let y = (v * h as f32).floor() as i64 as u32 & (h - 1);
-        self.levels[level][(y * w + x) as usize]
+        Lod { px: &self.levels[level], w, h, wide: w as f32, high: h as f32 }
+    }
+}
+
+/// One mip level of a texture. The painter finds it once for a triangle
+/// and then reads a texel for each pixel.
+#[derive(Clone, Copy)]
+struct Lod<'a> { px: &'a [Rgb], w: u32, h: u32, wide: f32, high: f32 }
+
+impl Lod<'_> {
+    #[inline]
+    fn at(&self, u: f32, v: f32) -> Rgb {
+        let x = (u * self.wide).floor() as i64 as u32 & (self.w - 1);
+        let y = (v * self.high).floor() as i64 as u32 & (self.h - 1);
+        self.px[(y * self.w + x) as usize]
     }
 }
 
@@ -586,12 +601,26 @@ impl Scene {
     }
 
     fn push_view_tri(&mut self, a: Vert, b: Vert, c: Vert, mat: Mat) {
-        let poly = clip_near_verts(&[a, b, c], self.near);
-        if poly.len() < 3 { return; }
-        let sv: Vec<SV> = poly.iter().map(|v| {
+        // Cut by the near plane a triangle has four corners at most, so
+        // they fit in an array: nothing is taken from the heap here.
+        let (tri, mut cut, mut n) = ([a, b, c], [a; 4], 0);
+        for i in 0..3 {
+            let (p, q) = (tri[i], tri[(i + 1) % 3]);
+            let (inp, inq) = (p.p.z >= self.near, q.p.z >= self.near);
+            if inp { cut[n] = p; n += 1; }
+            if inp != inq { cut[n] = p.lerp(q, (self.near - p.p.z) / (q.p.z - p.p.z)); n += 1; }
+        }
+        if n < 3 { return; }
+        let poly = &cut[..n];
+        let mut on = [SV { x: 0.0, y: 0.0, iz: 0.0, uz: 0.0, vz: 0.0, lit: [0.0; 3] }; 4];
+        for (s, v) in on.iter_mut().zip(poly) {
             let iz = 1.0 / v.p.z;
-            SV { x: self.w as f32 / 2.0 + v.p.x * self.focal * iz, y: self.h as f32 / 2.0 - v.p.y * self.focal * iz, iz, uz: v.u * iz, vz: v.v * iz, lit: v.lit }
-        }).collect();
+            *s = SV { x: self.w as f32 / 2.0 + v.p.x * self.focal * iz, y: self.h as f32 / 2.0 - v.p.y * self.focal * iz, iz, uz: v.u * iz, vz: v.v * iz, lit: v.lit };
+        }
+        let sv = &on[..n];
+        // Off the picture to one side: nothing more to work out.
+        let (w, h) = (self.w as f32, self.h as f32);
+        if sv.iter().all(|p| p.x < 0.0) || sv.iter().all(|p| p.x >= w) || sv.iter().all(|p| p.y < 0.0) || sv.iter().all(|p| p.y >= h) { return; }
         // Which mip level: texels per pixel over the whole triangle.
         let mut mag = false;
         let level = match mat {
@@ -605,14 +634,19 @@ impl Scene {
                     for i in 2..poly.len() - 1 { let (q, r) = (sv[i - 1], sv[i]); pixels += ((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x)).abs(); }
                 }
                 mag = self.smooth && pixels > 1e-3 && texels < pixels * 0.7;
-                if pixels < 1e-3 { tex.levels() - 1 } else { ((texels / pixels).max(1.0).log2() * 0.5) as usize }.min(tex.levels() - 1)
+                // A level up for each four texels on a pixel: half the
+                // logarithm, found by counting.
+                let most = tex.levels() - 1;
+                let (mut level, mut four) = (if pixels < 1e-3 { most } else { 0 }, 4.0);
+                while level < most && texels >= pixels * four { level += 1; four *= 4.0; }
+                level
             }
             Mat::Flat(_) => 0,
         };
         for i in 1..sv.len() - 1 {
             let v = [sv[0], sv[i], sv[i + 1]];
-            let y0 = v.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
-            let y1 = v.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max);
+            let (low, high) = (|a: f32, b: f32| if b < a { b } else { a }, |a: f32, b: f32| if b > a { b } else { a });
+            let (y0, y1) = (low(low(v[0].y, v[1].y), v[2].y), high(high(v[0].y, v[1].y), v[2].y));
             if v.iter().all(|p| p.x < 0.0) || v.iter().all(|p| p.x >= self.w as f32) || y1 < 0.0 || y0 >= self.h as f32 { continue; }
             self.tris.push(STri { v, mat, level, mag, y0: (y0 - 0.5).ceil() as i32, y1: (y1 - 0.5).ceil() as i32 - 1 });
         }
@@ -623,8 +657,8 @@ impl Scene {
     /// up * (h/2 - y)`, which is what `ray` returns at length one.
     pub fn axes(&self) -> (V3, V3, V3) { (self.right, self.up, self.fwd) }
 
-    /// Paint the frame: the sky through every pixel first, from the
-    /// direction it looks along, then the triangles over it. The rows are
+    /// Paint the frame: the triangles, then the sky through every pixel
+    /// they left open, from the direction it looks along. The rows are
     /// split into bands, and each core takes the next band when it is
     /// done, so fast cores paint more of them than slow ones.
     pub fn render(&mut self, f: &mut Frame, sky: &(dyn Fn(V3) -> Rgb + Sync)) { self.show(f, Back::Rays(sky)); }
@@ -642,7 +676,10 @@ impl Scene {
         let mut zbuf = std::mem::take(&mut self.zbuf);
         zbuf.fill(0.0);
         let threads = if self.threads > 0 { self.threads } else { std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1) }.clamp(1, 64);
-        let band = ((self.h as usize + threads * 4 - 1) / (threads * 4)).max(1);
+        // Four bands a core, so no core waits long for the slowest band.
+        // One core takes the picture whole and reads the triangles once.
+        let bands = if threads == 1 { 1 } else { threads * 4 };
+        let band = ((self.h as usize + bands - 1) / bands).max(1);
         let w = self.w as usize;
         let bands = f.px.chunks_mut(band * w).zip(zbuf.chunks_mut(band * w)).enumerate()
             .map(|(i, (p, z))| (i * band, p, z));
@@ -669,17 +706,14 @@ impl Scene {
     fn paint(&self, y0: usize, px: &mut [Rgb], zb: &mut [f32], back: Back) {
         let w = self.w as usize;
         let rows = px.len() / w;
-        match back {
-            Back::Rays(sky) => for r in 0..rows {
-                let y = (y0 + r) as f32 + 0.5;
-                for x in 0..w {
-                    px[r * w + x] = sky(self.ray(x as f32 + 0.5, y));
-                }
-            },
-            Back::Rows(paint) => for (r, row) in px.chunks_mut(w).enumerate() { paint(y0 + r, row); },
+        // A painter of rows goes first and the triangles over it. A sky
+        // by rays waits: it is asked only for what stays open.
+        if let Back::Rows(paint) = back {
+            for (r, row) in px.chunks_mut(w).enumerate() { paint(y0 + r, row); }
         }
         let (by0, by1) = (y0 as i32, (y0 + rows) as i32 - 1);
         let fog = self.fog;
+        let mist = if WEB { mist() } else { &[] };
         for t in &self.tris {
             if t.y1 < by0 || t.y0 > by1 { continue; }
             let mut v = t.v;
@@ -688,6 +722,7 @@ impl Scene {
             let edge = |a: SV, c: SV, y: f32| { let s = if c.y - a.y > 1e-6 { ((y - a.y) / (c.y - a.y)).clamp(0.0, 1.0) } else { 1.0 }; a.lerp(c, s) };
             let tex = match t.mat { Mat::Tex(i) => Some(&self.textures[i]), Mat::Flat(_) => None };
             let flat = match t.mat { Mat::Flat(c) => c, _ => 0 };
+            let lod = tex.map(|x| x.lod(t.level));
             for y in t.y0.max(by0).max(0)..=t.y1.min(by1).min(self.h - 1) {
                 let yc = y as f32 + 0.5;
                 let a = edge(top, bot, yc);
@@ -708,15 +743,19 @@ impl Scene {
                     let i = row + x as usize;
                     if iz > zb[i] {
                         let z = 1.0 / iz;
-                        let c = match tex {
-                            Some(tex) if t.mag => tex.smooth_texel(uz * z, vz * z),
-                            Some(tex) => tex.texel(t.level, uz * z, vz * z),
-                            None => flat,
+                        let c = match (tex, lod) {
+                            (Some(tex), _) if t.mag => tex.smooth_texel(uz * z, vz * z),
+                            (_, Some(lod)) => lod.at(uz * z, vz * z),
+                            _ => flat,
                         };
                         if c != CUTOUT {
                             zb[i] = iz;
-                            let c = shade3(c, lit);
-                            px[i] = match fog { Some((fc, dist)) => blend(c, fc, 1.0 - (-z / dist).exp()), None => c };
+                            px[i] = if WEB {
+                                web_pixel(c, lit, fog.map(|(fc, dist)| (fc, fogged(mist, z / dist))))
+                            } else {
+                                let c = shade3(c, lit);
+                                match fog { Some((fc, dist)) => blend(c, fc, 1.0 - (-z / dist).exp()), None => c }
+                            };
                         }
                     }
                     iz += d.iz; uz += d.uz; vz += d.vz;
@@ -724,7 +763,52 @@ impl Scene {
                 }
             }
         }
+        // No depth was written where nothing was drawn.
+        if let Back::Rays(sky) = back {
+            for r in 0..rows {
+                let y = (y0 + r) as f32 + 0.5;
+                for x in 0..w {
+                    if zb[r * w + x] == 0.0 { px[r * w + x] = sky(self.ray(x as f32 + 0.5, y)); }
+                }
+            }
+        }
     }
+}
+
+/// Fog for a web page, read from a table. The fog is worked out for
+/// every pixel, and a page has no fast `exp`, so the table is quicker
+/// there. Entry `i` is the fog `i / MIST` fog distances away,
+/// which is 1 - e^-t, and between two entries the value lies on the line
+/// through them. Past 18 distances nothing is left to see.
+const MIST: f32 = 256.0;
+const WEB: bool = cfg!(target_arch = "wasm32");
+
+fn mist() -> &'static [f32] {
+    static TABLE: std::sync::OnceLock<Vec<f32>> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| (0..=18 * MIST as usize).map(|i| (1.0 - (-(i as f64) / MIST as f64).exp()) as f32).collect())
+}
+
+#[inline]
+fn fogged(mist: &[f32], t: f32) -> f32 {
+    let at = t * MIST;
+    let i = at as usize;
+    if i + 1 >= mist.len() { return 1.0; }
+    mist[i] + (mist[i + 1] - mist[i]) * (at - i as f32)
+}
+
+/// Light and fog on one pixel for a web page, in whole numbers, which
+/// are quicker there than sums with fractions. `t` is how much of the
+/// fog colour shows, from 0 to 1. A part of the colour comes out two
+/// levels off at most.
+#[inline]
+fn web_pixel(c: Rgb, lit: [f32; 3], fog: Option<(Rgb, f32)>) -> Rgb {
+    let part = |v: u32, k: f32| (v * ((k * 256.0) as u32).min(1 << 16) >> 8).min(255);
+    let (r, g, b) = (part(c >> 16 & 255, lit[0]), part(c >> 8 & 255, lit[1]), part(c & 255, lit[2]));
+    let Some((fc, t)) = fog else { return r << 16 | g << 8 | b };
+    let t = (t * 256.0 + 0.5) as u32;
+    // Red and blue in one sum: 255 * 256 leaves each its sixteen bits.
+    let both = |a: u32, b: u32| (a * (256 - t) + b * t) >> 8;
+    both(r << 16 | b, fc & 0xff00ff) & 0xff00ff | both(g, fc >> 8 & 255) << 8
 }
 
 /// How much a matrix stretches things, for a bounding radius.
@@ -734,24 +818,46 @@ fn scale_of(m: &M4) -> f32 {
         .into_iter().fold(0.0f32, f32::max).sqrt().max(1e-6)
 }
 
-fn clip_near_verts(poly: &[Vert], near: f32) -> Vec<Vert> {
-    let mut out = Vec::with_capacity(4);
-    for i in 0..poly.len() {
-        let (a, b) = (poly[i], poly[(i + 1) % poly.len()]);
-        let (ina, inb) = (a.p.z >= near, b.p.z >= near);
-        if ina { out.push(a); }
-        if ina != inb {
-            let t = (near - a.p.z) / (b.p.z - a.p.z);
-            out.push(a.lerp(b, t));
-        }
-    }
-    out
-}
-
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_web_pixel_is_two_levels_off_at_most() {
+        let mut n = 12345u32;
+        let mut any = || { n = n.wrapping_mul(1664525).wrapping_add(1013904223); n >> 8 };
+        for i in 0..200_000 {
+            let (c, fc) = (any(), any());
+            let lit = [any() as f32 / 8e6, any() as f32 / 8e6, any() as f32 / 8e6];
+            let t = match i % 5 { 0 => 0.0, 1 => 1.0, _ => any() as f32 / 16777216.0 };
+            for fog in [None, Some((fc, t))] {
+                let exact = match fog { Some((fc, t)) => blend(shade3(c, lit), fc, t), None => shade3(c, lit) };
+                let (web, (er, eg, eb)) = (parts(web_pixel(c, lit, fog)), parts(exact));
+                let off = |a: u8, b: u8| (a as i32 - b as i32).abs();
+                assert!(off(web.0, er) <= 2 && off(web.1, eg) <= 2 && off(web.2, eb) <= 2, "{c:06x} {lit:?} {fog:?}: {web:?} for {:?}", (er, eg, eb));
+            }
+        }
+        // No light is black, strong light stops at white, full fog is the fog.
+        assert_eq!(web_pixel(0xffffff, [0.0; 3], None), 0);
+        assert_eq!(web_pixel(0x808080, [1e9, 4.0, 2.0], None), 0xffffff);
+        assert_eq!(web_pixel(0x123456, [1.0; 3], Some((0xabcdef, 1.0))), 0xabcdef);
+        assert_eq!(web_pixel(0x123456, [1.0; 3], Some((0xabcdef, 0.0))), 0x123456);
+    }
+
+    #[test]
+    fn the_fog_table_gives_what_exp_gives() {
+        let mist = mist();
+        for i in 0..40_000 {
+            let t = i as f32 * 0.0005;
+            let (table, exact) = (fogged(mist, t), 1.0 - (-t as f64).exp());
+            assert!((table as f64 - exact).abs() < 3e-6, "{t}: {table} for {exact}");
+        }
+        // Where `exp` has run out of digits, so has the table.
+        assert_eq!(fogged(mist, 18.0), 1.0);
+        assert_eq!(fogged(mist, 1e9), 1.0);
+        assert_eq!(fogged(mist, 0.0), 0.0);
+    }
 
     #[test]
     fn a_cube_in_front_of_the_camera_lands_in_the_middle() {
