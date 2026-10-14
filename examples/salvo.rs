@@ -24,7 +24,7 @@ const H: i32 = 270;
 const BOT: i32 = H - 26;
 const GAME: &str = "salvo";
 /// The game's own version; the engine has its own.
-const VERSION: &str = "1.2";
+const VERSION: &str = "1.3";
 const TEXT: Rgb = 0xf0f0f0;
 const GOLD: Rgb = 0xffd040;
 /// Moves of the ship between it and its first option, and between options.
@@ -1441,16 +1441,22 @@ impl Salvo {
         let mut broke = None;
         let stop = match b.kind {
             BossKind::Core => {
-                if (-50.0..=0.0).contains(&dx) && dy.abs() < 9.0 {
+                let bare = b.plates.iter().all(|&p| p <= 0);
+                // The core, from its left edge to its middle. A shot moves
+                // up to 11 pixels a tick (the laser), so the zone is wider
+                // than that, or a shot can step over it into the spine.
+                if bare && (-12.0..=2.0).contains(&dx) && dy.abs() < 9.0 {
+                    b.hp -= dmg;
+                    hurt = true;
+                    true
+                } else if (-50.0..=0.0).contains(&dx) && dy.abs() < 9.0 {
                     match b.plates.iter().position(|&p| p > 0) {
                         Some(i) if dx >= -46.0 + i as f32 * 8.0 => {
                             b.plates[i] -= dmg;
                             if b.plates[i] <= 0 { broke = Some((b.x - 44.0 + i as f32 * 8.0, b.y)); }
                             true
                         }
-                        Some(_) => false,
-                        None if dx >= -6.0 => { b.hp -= dmg; hurt = true; true }
-                        None => false,
+                        _ => false,
                     }
                 } else {
                     core_solid(dx, dy)
@@ -2293,6 +2299,31 @@ mod tests {
                 if g.boss.as_ref().unwrap().hp <= 0 { break; }
             }
             assert!(g.boss.as_ref().unwrap().hp <= 0, "stage {} boss survives", n + 1);
+        }
+    }
+
+    #[test]
+    fn a_shot_at_full_speed_never_steps_over_the_core() {
+        // Until 1.3 the core took a hit only 0 to 6 pixels left of its
+        // middle, and a shot moves 7.7 a tick. From some places every
+        // shot struck the spine behind the core, and the boss never died.
+        for speed in [460.0f32, 640.0] {
+            let step = speed / 60.0;
+            let mut phase = 0.0;
+            while phase < step {
+                let mut g = Salvo::new();
+                g.load(0);
+                g.mode = Mode::Play;
+                g.start_boss();
+                let b = g.boss.as_mut().unwrap();
+                b.x = b.tx;
+                b.plates.iter_mut().for_each(|p| *p = 0);
+                let (bx, by, hp) = (b.x, b.y, b.hp);
+                let mut x = bx - 120.0 + phase;
+                while !g.boss_hit(x, by, 1) { x += step; }
+                assert_eq!(g.boss.as_ref().unwrap().hp, hp - 1, "a shot at {speed} from {phase} hit the hull");
+                phase += 0.25;
+            }
         }
     }
 
