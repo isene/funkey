@@ -65,6 +65,13 @@ const AMBER: Rgb = 0xffc040;
 const RED: Rgb = 0xff4838;
 const TEXT: Rgb = 0xf0f0f0;
 
+/// The ground is cast for every column, or on a web page, with one core,
+/// for every other one and drawn two pixels wide.
+#[cfg(not(target_arch = "wasm32"))]
+const WIDE: usize = 1;
+#[cfg(target_arch = "wasm32")]
+const WIDE: usize = 2;
+
 fn lerp(a: Rgb, b: Rgb, t: f32) -> Rgb { funkey::raster::blend(a, b, t.clamp(0.0, 1.0)) }
 
 fn scale(c: Rgb, k: f32) -> Rgb { tinted(c, [k, k, k]) }
@@ -96,6 +103,11 @@ fn cores() -> usize { std::thread::available_parallelism().map(|n| n.get()).unwr
 
 /// Fill a map row by row, the rows shared out over the cores.
 fn rows<T: Send>(data: &mut [T], fill: impl Fn(usize, &mut [T]) + Sync) {
+    // A web page has one thread and cannot start another.
+    if cores() == 1 {
+        for (y, row) in data.chunks_mut(MAP).enumerate() { fill(y, row); }
+        return;
+    }
     let per = MAP.div_ceil(cores()) * MAP;
     std::thread::scope(|s| {
         for (i, part) in data.chunks_mut(per).enumerate() {
@@ -1905,19 +1917,25 @@ impl Raid {
         let strip = 8;
         let next = std::sync::Mutex::new(cols.chunks_mut(vh * strip).zip(deps.chunks_mut(vh * strip)).zip(tops.chunks_mut(strip)).enumerate());
         let (terrain, dirs, time) = (&self.terrain, &self.dirs, self.time);
-        std::thread::scope(|s| {
-            for _ in 0..cores() {
-                s.spawn(|| loop {
-                    let job = next.lock().unwrap().next();
-                    let Some((i, ((col, dep), top))) = job else { break };
-                    for (k, t) in top.iter_mut().enumerate() {
-                        let x = i * strip + k;
-                        *t = column(terrain, sky, time, dirs[x], x, &mut col[k * vh..(k + 1) * vh], &mut dep[k * vh..(k + 1) * vh], eye);
-                    }
-                });
+        let work = || loop {
+            let job = next.lock().unwrap().next();
+            let Some((i, ((col, dep), top))) = job else { break };
+            for (k, t) in top.iter_mut().enumerate() {
+                let x = i * strip + k;
+                if x % WIDE != 0 { continue; }
+                *t = column(terrain, sky, time, dirs[x], x, &mut col[k * vh..(k + 1) * vh], &mut dep[k * vh..(k + 1) * vh], eye);
             }
-        });
+        };
+        // A web page has one thread and cannot start another.
+        if cores() == 1 { work() } else { std::thread::scope(|s| for _ in 0..cores() { s.spawn(&work); }); }
         drop(next);
+        if WIDE == 2 {
+            for x in (1..w).step_by(2) {
+                tops[x] = tops[x - 1];
+                cols.copy_within((x - 1) * vh..x * vh, x * vh);
+                deps.copy_within((x - 1) * vh..x * vh, x * vh);
+            }
+        }
         for y in 0..vh {
             for x in 0..w {
                 if y as i32 >= tops[x] { f.px[y * w + x] = cols[x * vh + y]; }
@@ -2221,6 +2239,7 @@ fn raid(sound: bool) -> Raid {
     game
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     // RAID_BENCH=<frames> flies that many frames with no terminal and
     // prints the time one takes.
@@ -2229,11 +2248,16 @@ fn main() {
         if game.mode == Mode::Title { game.start(); game.mode = Mode::Fly; }
         let mut input = Input::new();
         input.inject(Key::Up);
-        bench(&mut game, &input, Config { width: W, height: H, fps: 30 }, n.parse().unwrap_or(300));
+        let f = bench(&mut game, &input, Config { width: W, height: H, fps: 30 }, n.parse().unwrap_or(300));
+        if let Ok(p) = std::env::var("FUNKEY_SHOT") { let _ = std::fs::write(p, f.to_ppm()); }
         return;
     }
     run(&mut raid(true), Config { width: W, height: H, fps: 30 });
 }
+
+// In a web page: see web/ in this repo.
+#[cfg(target_arch = "wasm32")]
+funkey::web!(raid(true), Config { width: W, height: H, fps: 30 });
 
 #[cfg(test)]
 mod tests {

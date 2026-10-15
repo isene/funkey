@@ -30,6 +30,13 @@ const VERSION: &str = "1.1";
 /// Layers of noise, each twice as fine and half as tall.
 fn fbm(x: f32, y: f32, octaves: u32, seed: u32) -> f32 { funkey::noise::fbm(x, y, octaves, seed, 8) }
 
+/// The ground is cast for every column, or on a web page, with one core,
+/// for every other one and drawn two pixels wide.
+#[cfg(not(target_arch = "wasm32"))]
+const WIDE: usize = 1;
+#[cfg(target_arch = "wasm32")]
+const WIDE: usize = 2;
+
 fn lerp(a: Rgb, b: Rgb, t: f32) -> Rgb { funkey::raster::blend(a, b, t.clamp(0.0, 1.0)) }
 fn scale(c: Rgb, k: f32) -> Rgb {
     let (r, g, b) = parts(c);
@@ -361,15 +368,22 @@ impl Game for Soar {
         let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
         let next = std::sync::Mutex::new(cols.chunks_mut(h * strip).zip(tops.chunks_mut(strip)).enumerate());
         let me = &*self;
-        std::thread::scope(|s| {
-            for _ in 0..threads {
-                s.spawn(|| loop {
-                    let job = next.lock().unwrap().next();
-                    let Some((i, (col, top))) = job else { break };
-                    for (k, t) in top.iter_mut().enumerate() { *t = me.column(i * strip + k, &mut col[k * h..(k + 1) * h], horizon, focal); }
-                });
+        let work = || loop {
+            let job = next.lock().unwrap().next();
+            let Some((i, (col, top))) = job else { break };
+            for (k, t) in top.iter_mut().enumerate() {
+                if (i * strip + k) % WIDE != 0 { continue; }
+                *t = me.column(i * strip + k, &mut col[k * h..(k + 1) * h], horizon, focal);
             }
-        });
+        };
+        // A web page has one thread and cannot start another.
+        if threads == 1 { work() } else { std::thread::scope(|s| for _ in 0..threads { s.spawn(&work); }); }
+        if WIDE == 2 {
+            for x in (1..w).step_by(2) {
+                tops[x] = tops[x - 1];
+                cols.copy_within((x - 1) * h..x * h, x * h);
+            }
+        }
         for y in 0..h {
             for x in 0..w {
                 if y as i32 >= tops[x] { f.px[y * w + x] = cols[x * h + y]; }
@@ -383,13 +397,19 @@ impl Game for Soar {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     let mut game = Soar::new();
     // SOAR_BENCH=<frames> flies that many frames with no terminal and
     // prints the time one takes.
     if let Ok(n) = std::env::var("SOAR_BENCH") {
-        bench(&mut game, &Input::new(), Config { width: W, height: H, fps: 30 }, n.parse().unwrap_or(300));
+        let f = bench(&mut game, &Input::new(), Config { width: W, height: H, fps: 30 }, n.parse().unwrap_or(300));
+        if let Ok(p) = std::env::var("FUNKEY_SHOT") { let _ = std::fs::write(p, f.to_ppm()); }
         return;
     }
     run(&mut game, Config { width: W, height: H, fps: 30 });
 }
+
+// In a web page: see web/ in this repo.
+#[cfg(target_arch = "wasm32")]
+funkey::web!(Soar::new(), Config { width: W, height: H, fps: 30 });

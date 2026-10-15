@@ -120,7 +120,9 @@ cargo build --release --target wasm32-unknown-unknown --features eliminator
 ```
 
 Play it at [d6gaming.org](https://d6gaming.org/The_Eliminator_game.html).
-Fourteen of the games play at [isene.org/fe2o3/try](https://isene.org/fe2o3/try/funkeys/).
+Seventeen of the games play at [isene.org/fe2o3/try](https://isene.org/fe2o3/try/funkeys/).
+A page has one core, so there raid and soar cast the ground for every
+other column, and castle draws a picture half as wide and high.
 
 A game talks to its page through `funkey::page`: `send` a message out,
 `recv` one back; in a terminal both do nothing. The top ten uses it: in a

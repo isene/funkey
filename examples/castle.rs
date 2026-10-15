@@ -17,8 +17,15 @@ use funkey::noise::{hash, noise2, ridged, smooth};
 use funkey::*;
 use std::f32::consts::{PI, TAU};
 
+// A web page has one core, so there the picture is half as wide and high.
+#[cfg(not(target_arch = "wasm32"))]
 const W: i32 = 960;
+#[cfg(not(target_arch = "wasm32"))]
 const H: i32 = 600;
+#[cfg(target_arch = "wasm32")]
+const W: i32 = 480;
+#[cfg(target_arch = "wasm32")]
+const H: i32 = 300;
 /// The demo's own version; the engine has its own.
 const VERSION: &str = "1.1";
 /// The castle stands on a rise this high.
@@ -401,15 +408,16 @@ fn build_land(casters: &[Aabb], tx: &Tx) -> Vec<Model> {
     let (cell, per, span) = (30.0, 15usize, 1800.0);
     let n = (2.0 * span / cell) as usize / per;
     for cz in 0..n { for cx in 0..n { jobs.push((-span + (cx * per) as f32 * cell, -span + (cz * per) as f32 * cell, per, per, cell, false)); } }
-    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(1, 32);
-    let mut out: Vec<Vec<(usize, Model)>> = std::thread::scope(|s| {
-        let handles: Vec<_> = (0..threads).map(|t| {
-            let jobs = &jobs;
-            s.spawn(move || jobs.iter().enumerate().skip(t).step_by(threads)
-                .map(|(i, &(x0, z0, nx, nz, cell, fine))| (i, land_chunk(x0, z0, nx, nz, cell, fine, (!fine).then_some(FINE), FINE, casters, tx))).collect::<Vec<_>>())
-        }).collect();
-        handles.into_iter().map(|h| h.join().unwrap()).collect()
-    });
+    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).clamp(1, 32);
+    let part = |t: usize| jobs.iter().enumerate().skip(t).step_by(threads)
+        .map(|(i, &(x0, z0, nx, nz, cell, fine))| (i, land_chunk(x0, z0, nx, nz, cell, fine, (!fine).then_some(FINE), FINE, casters, tx))).collect::<Vec<_>>();
+    // A web page has one thread and cannot start another.
+    let mut out: Vec<Vec<(usize, Model)>> = if threads == 1 { vec![part(0)] } else {
+        std::thread::scope(|s| {
+            let handles: Vec<_> = (0..threads).map(|t| { let part = &part; s.spawn(move || part(t)) }).collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        })
+    };
     let mut all: Vec<(usize, Model)> = out.drain(..).flatten().collect();
     all.sort_by_key(|(i, _)| *i);
     all.into_iter().map(|(_, m)| m).collect()
@@ -696,6 +704,8 @@ struct Castle {
 
 impl Castle {
     fn new() -> Castle {
+        // A web page has no clock here; the bench times are for the terminal.
+        #[cfg(not(target_arch = "wasm32"))]
         let t0 = std::time::Instant::now();
         let mut scene = Scene::new(W, H);
         scene.fog = Some((HAZE, 1100.0));
@@ -723,6 +733,7 @@ impl Castle {
         for _ in 0..22050 { x ^= x << 13; x ^= x >> 17; x ^= x << 5; let r = (x >> 16) as f32 / 32768.0 - 1.0; v += (r - v) * 0.06; wind.push((v * 11000.0) as i16); }
         audio.play_loop(1, &Sample::from_i16(wind), 0.3);
         let steps = Sample::noise(0.05, 0.16);
+        #[cfg(not(target_arch = "wasm32"))]
         if std::env::var_os("CASTLE_BENCH").is_some() { eprintln!("built in {:.2} s", t0.elapsed().as_secs_f64()); }
         let mut c = Castle { scene, tx, land, castle, doors, path, trees, clouds, cum, s: 0.0, x: 0.0, z: 0.0, yaw: 0.0, pitch: 0.0, speed: 0.0, pace: 1.0,
             auto: true, idle: 0.0, time: 0.0, phase: Phase::Approach, phase_t: 0.0, fade: 1.0, step_t: 0.0, audio, steps, paint_ms: 0.0 };
@@ -948,15 +959,18 @@ impl Game for Castle {
             }
             c
         };
+        #[cfg(not(target_arch = "wasm32"))]
         let t0 = std::time::Instant::now();
         scene.render(f, &sky);
-        self.paint_ms += t0.elapsed().as_secs_f64() * 1000.0;
+        #[cfg(not(target_arch = "wasm32"))]
+        { self.paint_ms += t0.elapsed().as_secs_f64() * 1000.0; }
         if self.auto { f.text_big(8, H - 14, "AUTO", 0xe8e0d0); }
         f.text(W - 4 - Frame::text_width(VERSION, false, 1), H - 7, VERSION, 0x9a9080);
         if self.fade > 0.0 { f.dim(1.0 - self.fade); }
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     let mut game = Castle::new();
     if let Ok(n) = std::env::var("CASTLE_BENCH") {
@@ -968,6 +982,10 @@ fn main() {
     }
     run(&mut game, Config { width: W, height: H, fps: 30 });
 }
+
+// In a web page: see web/ in this repo.
+#[cfg(target_arch = "wasm32")]
+funkey::web!(Castle::new(), Config { width: W, height: H, fps: 30 });
 
 #[cfg(test)]
 mod tests {

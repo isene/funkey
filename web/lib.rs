@@ -66,6 +66,21 @@ mod chomp;
 #[allow(dead_code)]
 mod kart;
 
+#[cfg(feature = "raid")]
+#[path = "../examples/raid.rs"]
+#[allow(dead_code)]
+mod raid;
+
+#[cfg(feature = "soar")]
+#[path = "../examples/soar.rs"]
+#[allow(dead_code)]
+mod soar;
+
+#[cfg(feature = "castle")]
+#[path = "../examples/castle.rs"]
+#[allow(dead_code)]
+mod castle;
+
 #[cfg(feature = "blocks")]
 #[path = "../examples/blocks.rs"]
 #[allow(dead_code)]
