@@ -62,6 +62,7 @@ server.listen(0, "127.0.0.1", async () => {
     await page.goto(base);
     await page.waitForSelector(".card");
     check("the lobby shows twelve games", (await page.$$(".card")).length === 12);
+    check("the lobby greets", (await page.textContent("h1")) === "Welcome to the funkey game room.");
     await page.fill("#search", "tetris");
     const found = await page.$$eval(".card:not([hidden])", e => e.map(x => x.dataset.name));
     check("a search finds stack by what it is like", found.join() === "stack", found);
@@ -77,8 +78,22 @@ server.listen(0, "127.0.0.1", async () => {
     await page.waitForTimeout(1500);
     check("a big saved value does not break the page", errors.length === 0, errors);
 
-    // Start a war and leave it: Q saves it, and the page keeps it.
+    // The banner over a game goes with the click, even in a game that
+    // waits for a key and draws nothing new: count its gold in the band.
+    const gold = () => page.evaluate(() => {
+      const c = document.getElementById("screen");
+      const d = c.getContext("2d").getImageData(0, Math.round(c.height * 0.42), c.width, Math.round(c.height * 0.16)).data;
+      let n = 0;
+      for (let i = 0; i < d.length; i += 4) if (d[i] === 255 && d[i + 1] === 208 && d[i + 2] === 64) n++;
+      return n;
+    });
+    const before = await gold();
     await page.click("textarea[inputmode=none]");
+    await page.waitForTimeout(300);
+    const after = await gold();
+    check("the banner goes with the click", before > 0 && after === 0, [before, after]);
+
+    // Start a war and leave it: Q saves it, and the page keeps it.
     for (const k of ["Enter", "q"]) { await page.keyboard.press(k); await page.waitForTimeout(400); }
     const war = await page.evaluate(() => localStorage.getItem("keep:wargame/war") || "");
     check("the page keeps the saved war", war.startsWith("MODE 0 1 0"), war.slice(0, 20));

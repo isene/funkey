@@ -12,7 +12,7 @@ use crust::{Crust, Cursor, Input, Pane, Popup};
 use std::io::Write;
 use std::path::PathBuf;
 
-const VERSION: &str = "1.14";
+const VERSION: &str = "1.15";
 const PAGE: &str = "https://isene.org/funkey/";
 
 struct Game {
@@ -37,7 +37,7 @@ const GAMES: &[Game] = &[
         name: "blocks",
         kind: "Block world",
         blurb: "In the spirit of Minecraft",
-        keys: "W and S walk, A and D sidestep, the arrows look round, Space\njumps and swims. F digs, E builds, 1 to 9 and 0 pick the kind,\nC lists the things to make. P pauses, Q quits.\n\nHills, a sea, a snowy mountain and groves grown from a seed.\nWhat you dig goes in your pockets, and you build from them.\nCats come to see who is there. N on the title: a new world.",
+        keys: "W and S walk, A and D sidestep, the arrows look round, Space\njumps and swims. F digs, E builds, 1 to 9 and 0 pick the kind,\nC lists the things to make. P pauses, Q goes to the title.\n\nHills, a sea, a snowy mountain and groves grown from a seed.\nWhat you dig goes in your pockets, and you build from them.\nCats come to see who is there. N on the title: a new world.",
         shot: include_bytes!("../../docs/img/blocks.png"),
     },
     Game {

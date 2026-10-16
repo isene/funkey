@@ -3,14 +3,16 @@
 //! on them, a sea, tunnels and groves grown from a seed, clouds over it
 //! all, and cats that come to see who is there. What is dug goes in the
 //! pockets, and a few things are made from what is in them. There is
-//! nothing to win.
+//! nothing to win, but a visit scores for the top ten: a point for every
+//! block dug or built and ten for each thing made.
 //!
 //!     cargo run --release --example blocks
 //!
 //! W and S walk, A and D sidestep, the arrows look round, Space jumps
 //! and swims. F digs the block in the frame, E builds on it, 1 to 9 and
 //! 0 pick the kind, C opens the list of things to make. P pauses, Q
-//! quits. The world is kept in ~/.funkey/blocks/world: its seed and
+//! goes back to the title with the score, and Q there quits. The world
+//! is kept in ~/.funkey/blocks/world: its seed and
 //! every block that was changed. `BLOCKS_BENCH=100` draws that many
 //! frames from the top of a tower, with no terminal, and prints the
 //! time a frame takes.
@@ -24,7 +26,7 @@ const W: i32 = 640;
 const H: i32 = 400;
 const GAME: &str = "blocks";
 /// The game's own version; the engine has its own.
-const VERSION: &str = "0.3";
+const VERSION: &str = "0.4";
 
 /// The world's size in blocks: across, up and deep.
 const SX: i32 = 256;
@@ -732,6 +734,8 @@ struct Blocks {
     /// or a bench.
     stored: bool,
     unsaved: bool,
+    /// This visit's score.
+    score: u32,
     /// Seconds since the last change.
     since: f32,
     time: f32,
@@ -764,7 +768,7 @@ impl Blocks {
         let mut b = Blocks {
             world, scene, chunks: Vec::new(), order: Vec::new(), ordered: (-1, -1), me: Body { pos: V3::default(), rise: 0.0, grounded: false }, yaw: 0.0, pitch: 0.0, was_wet: false, pick: 0,
             have: [0; 10], pickaxe: false, cats: Vec::new(), coats: COATS.iter().map(|&c| cat(c)).collect(), looking: 0.0, again: 0.0, mode: Mode::Title,
-            row: 0, note: (String::new(), 0.0), stored: false, unsaved: false, since: 0.0, time: 0.0, waves: (0..16).map(wave).collect(), wave: 0, icons,
+            row: 0, note: (String::new(), 0.0), stored: false, unsaved: false, score: 0, since: 0.0, time: 0.0, waves: (0..16).map(wave).collect(), wave: 0, icons,
             faded, tool: pickaxe(), rng: Rng::new(1), audio: Audio::off(), snd,
         };
         b.mesh_all();
@@ -953,6 +957,7 @@ impl Blocks {
             if b == BEDROCK { return; }
             if matches!(b, STONE | BRICK) && !self.pickaxe { return self.say("STONE NEEDS A PICKAXE: C MAKES ONE".into()); }
             self.set(c, AIR);
+            self.score += 1;
             if let Some(s) = slot(b) { self.have[s] += 1; }
             self.audio.play(&self.snd.dig, 0.5);
             return;
@@ -964,6 +969,7 @@ impl Blocks {
         if self.cats.iter().any(|cat| boxed(to, cat.body.pos, CAT_HALF, CAT_TALL)) { return; }
         if self.have[self.pick] == 0 { return self.say(format!("NO {} LEFT: DIG SOME, OR C MAKES THINGS", KINDS[self.pick].1)); }
         self.have[self.pick] -= 1;
+        self.score += 1;
         self.set(to, KINDS[self.pick].0);
         self.audio.play(&self.snd.build, 0.6);
     }
@@ -986,6 +992,7 @@ impl Blocks {
             None => self.pickaxe = true,
         }
         (self.unsaved, self.since) = (true, 0.0);
+        self.score += 10;
         self.audio.play(&self.snd.made, 0.6);
         true
     }
@@ -1135,6 +1142,7 @@ impl Blocks {
             f.blit(&self.tool, x0 - 24, y + 2);
         }
         f.text_centered(W / 2, y - 17, KINDS[self.pick].1, WHITE, false, 1);
+        f.text(8, H - 9, &format!("SCORE {}", self.score), 0x9098a8);
         if self.note.1 > 0.0 { f.text_centered(W / 2, y - 40, &self.note.0, 0xffe08a, true, 1); }
     }
 
@@ -1209,9 +1217,14 @@ impl Game for Blocks {
             if key('c') || key('q') || input.pressed(Key::Escape) { self.mode = Mode::Play; } else { self.craft(input); }
             return Flow::Continue;
         }
+        // Q leaves the world for the title, with the score; Q there quits.
         if key('q') || input.pressed(Key::Escape) {
             self.keep();
-            return Flow::Quit;
+            if self.mode != Mode::Play { return Flow::Quit; }
+            self.mode = Mode::Title;
+            if self.score > 0 && !cfg!(test) { scores::record(GAME, self.score); }
+            self.score = 0;
+            return Flow::Continue;
         }
         match self.mode {
             Mode::Title => {
@@ -1300,7 +1313,7 @@ impl Game for Blocks {
         f.fancy_text(cx, 70, "BLOCKS", 8, self.time, (0x9be06a, 0x4a9a3c));
         f.text_centered(cx, 168, "W A S D WALK   ARROWS LOOK   SPACE JUMPS AND SWIMS", 0xd0d4e0, true, 1);
         f.text_centered(cx, 184, "F DIGS   E BUILDS   1-9 AND 0 PICK A BLOCK", 0xd0d4e0, true, 1);
-        f.text_centered(cx, 200, "C MAKES THINGS   P PAUSES   Q QUITS", 0xd0d4e0, true, 1);
+        f.text_centered(cx, 200, "C MAKES THINGS   P PAUSES   Q LEAVES", 0xd0d4e0, true, 1);
         f.text_centered(cx, 250, "SPACE: PLAY", 0x70e0d0, true, 2);
         f.text_centered(cx, 286, "N: A NEW WORLD", 0x9098a8, true, 1);
         f.text(W - 18, H - 9, VERSION, 0x9098a8);
@@ -1738,6 +1751,10 @@ mod tests {
         assert!(tick(&mut b, Key::Escape) == Flow::Continue && b.mode == Mode::Play);
         tick(&mut b, Key::Char('c'));
         assert!(tick(&mut b, Key::Char('q')) == Flow::Continue && b.mode == Mode::Play);
+        // The planks made scored ten. Q leaves for the title, and Q there quits.
+        assert_eq!(b.score, 10);
+        assert!(tick(&mut b, Key::Char('q')) == Flow::Continue && b.mode == Mode::Title);
+        assert_eq!(b.score, 0, "a new visit starts from nothing");
         assert_eq!(tick(&mut b, Key::Char('q')), Flow::Quit);
     }
 

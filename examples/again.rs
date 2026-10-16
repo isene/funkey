@@ -25,6 +25,10 @@
 //! Every room is proven by a search in the tests: it can be solved with
 //! the selves and steps it gives, and not with one self fewer.
 //!
+//! A room solved for the first time scores 100, and 10 for each step its
+//! last life had left, less 5 for each take-back, but at least 50. The
+//! score goes to the top ten when you leave a room for the title.
+//!
 //! `AGAIN_START=<room>` starts in a room; `AGAIN_BENCH=<frames>` times the
 //! game with no terminal. All of it is new: the rooms, the look, the
 //! sounds and the round that plays, which gains a voice with every self.
@@ -36,7 +40,7 @@ const W: i32 = 480;
 const H: i32 = 270;
 const GAME: &str = "again";
 /// The game's own version; the engine has its own.
-const VERSION: &str = "1.1";
+const VERSION: &str = "1.2";
 /// The most selves a room can give.
 const MOST: usize = 4;
 /// A tile's side in pixels, and the band of the screen a room is drawn in.
@@ -478,6 +482,14 @@ struct Again {
     rest: bool,
     /// The rooms solved, a bit a room.
     done: u32,
+    /// The score, and the score last sent to the top ten.
+    points: u32,
+    sent: u32,
+    /// Take-backs in this room, what solving it gave, and when the top
+    /// ten last had a score.
+    undos: u32,
+    gained: u32,
+    asked: f32,
     /// How many voices of the round are playing.
     voices: usize,
     particles: Particles,
@@ -486,10 +498,12 @@ struct Again {
 impl Again {
     fn new() -> Again {
         let done = if cfg!(test) { 0 } else { store::load(GAME, "solved").and_then(|s| s.trim().parse().ok()).unwrap_or(0) };
+        let kept: Vec<u32> = if cfg!(test) { Vec::new() } else { store::load(GAME, "points").unwrap_or_default().split_whitespace().filter_map(|w| w.parse().ok()).collect() };
         let mut game = Again {
             audio: Audio::off(), snd: Sounds::new(), mode: Mode::Title, time: 0.0, room: 0, lv: Level::parse(ROOMS[0].map),
             lives: Vec::new(), live: Vec::new(), path: Vec::new(), stops: Vec::new(), seen: Vec::new(), face: Vec::new(),
             bump: Vec::new(), ajar: Vec::new(), head: 0.0, hold: 0.0, rest: false, done, voices: 0, particles: Particles::new(),
+            points: kept.first().copied().unwrap_or(0), sent: kept.get(1).copied().unwrap_or(0), undos: 0, gained: 0, asked: -9.0,
         };
         game.go(game.first_open());
         game.mode = Mode::Title;
@@ -535,13 +549,25 @@ impl Again {
         self.seen.clear();
         self.particles.list.clear();
         self.rest = true;
+        (self.undos, self.gained) = (0, 0);
         self.replay();
     }
 
+    /// Back to the title, and a score that grew goes to the top ten.
     fn to_title(&mut self) {
         self.mode = Mode::Title;
         self.music();
+        if self.points > self.sent {
+            self.sent = self.points;
+            self.asked = self.time;
+            if !cfg!(test) {
+                scores::record(GAME, self.points);
+                self.keep_points();
+            }
+        }
     }
+
+    fn keep_points(&self) { store::save(GAME, "points", &format!("{} {}", self.points, self.sent)); }
 
     /// After a solved room: the next one, or the end when all are solved.
     fn next(&mut self) {
@@ -621,6 +647,11 @@ impl Again {
         let room = &ROOMS[self.room];
         if self.lv.won(&self.path[t + 1]) {
             self.mode = Mode::Solved(0.0);
+            if self.done >> self.room & 1 == 0 {
+                self.gained = (100 + 10 * (room.steps - t - 1) as u32).saturating_sub(5 * self.undos).max(50);
+                self.points += self.gained;
+                if !cfg!(test) { self.keep_points(); }
+            }
             self.done |= 1 << self.room;
             if !cfg!(test) { store::save(GAME, "solved", &self.done.to_string()); }
             self.audio.play(&self.snd.solved, 0.6);
@@ -636,6 +667,7 @@ impl Again {
     /// Take back a step. At the start of a life that is the last step of
     /// the life before, as it was when its keys ended.
     fn undo(&mut self) {
+        self.undos += 1;
         if self.tick() > self.live.len() {
             // Time ran on by itself: back to the last key.
         } else if self.live.pop().is_none() {
@@ -649,6 +681,7 @@ impl Again {
 
     /// Take back the life: this one, or at its start the one before.
     fn life_back(&mut self) {
+        self.undos += 1;
         if self.tick() == 0 { self.lives.pop(); }
         self.live.clear();
         self.replay();
@@ -793,7 +826,8 @@ impl Game for Again {
                     self.audio.play(&self.snd.step, 0.5);
                 }
                 if input.pressed(Key::Enter) || input.pressed(Key::Space) { self.go(self.room); return Flow::Continue; }
-                return Flow::Wait;
+                // A moment for the top ten to ask for initials.
+                return if self.time < self.asked + 1.2 { Flow::Continue } else { Flow::Wait };
             }
             Mode::End(s) => {
                 // Sparks for the first seconds of the last screen, four
@@ -815,6 +849,7 @@ impl Game for Again {
         }
         if quit { self.to_title(); return Flow::Continue; }
         if pressed('r') {
+            self.undos += 1;
             self.lives.clear();
             self.live.clear();
             self.replay();
@@ -1099,7 +1134,12 @@ impl Again {
         f.text_big(18, 4, &format!("{:02}  {}", self.room + 1, room.name), TEXT);
         let right = format!("LIFE {} OF {}    STEP {} OF {}", self.lives.len() + 1, room.selves, self.head.round() as usize, room.steps);
         f.text_big(W - 8 - Frame::text_width(&right, true, 1), 4, &right, DIM);
+        let solved;
         let (text, c) = match self.mode {
+            Mode::Solved(_) if self.gained > 0 => {
+                solved = format!("SOLVED: {} POINTS. ENTER FOR THE NEXT ROOM.", self.gained);
+                (solved.as_str(), GOLD)
+            }
             Mode::Solved(_) => ("SOLVED. ENTER FOR THE NEXT ROOM.", GOLD),
             Mode::Spent => ("NO SELF IS LEFT. U TAKES BACK A STEP, BACKSPACE THE LIFE, R THE WHOLE ROOM.", RED),
             _ => (room.says[(!self.lives.is_empty() && !room.says[1].is_empty()) as usize], TEXT),
@@ -1172,6 +1212,7 @@ impl Again {
         f.text_centered(W / 2, 242, "U TAKES BACK A STEP, BACKSPACE THE LIFE, R THE WHOLE ROOM.", DIM, false, 1);
         let v = format!("V{VERSION}");
         f.text(W - 6 - Frame::text_width(&v, false, 1), H - 9, &v, FAINT);
+        if self.points > 0 { f.text(6, H - 9, &format!("SCORE {}", self.points), DIM); }
     }
 
     fn draw_end(&self, f: &mut Frame, s: f32) {
@@ -1341,9 +1382,18 @@ mod tests {
         for (n, room) in ROOMS.iter().enumerate() {
             let answer = solve(&Level::parse(room.map), room.selves, room.steps).unwrap_or_else(|| panic!("{} has no answer", room.name));
             game.go(n);
+            let before = game.points;
             play(&mut game, &answer);
             assert!(matches!(game.mode, Mode::Solved(_)), "{} was not solved, mode {:?}", room.name, game.mode);
+            assert_eq!(game.points - before, game.gained, "{} scores what it says", room.name);
+            assert!(game.gained >= 100, "{} solved with no take-back gives 100 or more, not {}", room.name, game.gained);
         }
+        // Solved again, a room gives nothing more.
+        let before = game.points;
+        let last = ROOMS.len() - 1;
+        game.go(last);
+        play(&mut game, &solve(&Level::parse(ROOMS[last].map), ROOMS[last].selves, ROOMS[last].steps).unwrap());
+        assert_eq!(game.points, before);
         assert_eq!(game.done.count_ones() as usize, ROOMS.len());
         wait(&mut game, |g| matches!(g.mode, Mode::Solved(s) if s > 0.4));
         tap(&mut game, Key::Enter);

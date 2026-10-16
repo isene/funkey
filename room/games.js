@@ -4,8 +4,8 @@
 // kinds: the lobby's filters. line: the card's one line. about: the play
 // page's paragraph. size: the game's picture. v: the cache tag, the
 // game's version and the engine's. help: the keys, as HTML written here.
-// move and keys: the buttons on the screen for phones. scores: a shared
-// top ten.
+// move and keys: the buttons on the screen for phones. Every game has a
+// shared top ten.
 (function () {
   "use strict";
   const K = (k, label, small) => [k, label, small || ""];
@@ -18,23 +18,25 @@
     KINDS: ["Arcade", "Shooting", "Thinking", "Adventure", "Racing"],
     GAMES: {
       wargame: {
-        kinds: ["Thinking"], v: "0.2", size: [960, 600], isnew: true,
+        kinds: ["Thinking"], v: "0.3", size: [960, 600], isnew: true,
         line: "A hex wargame: North Africa or Stalingrad, 1942.",
         about: "A board wargame in the spirit of the 1980s classics, one side against the other on a hex map. " +
           "Rommel's drive for the Nile, or the drive for the Volga and the Soviet answer in the snow. " +
           "Supply, zones of control, odds and a die. Play either side against the computer, or two players at one keyboard.",
         alt: "wargame: the desert map of North Africa, German, Italian and British counters around Tobruk",
         help: "Arrows (or <kbd>h</kbd> <kbd>j</kbd> <kbd>k</kbd> <kbd>l</kbd>) move the cursor. " +
-          "<kbd>Enter</kbd> picks a unit and moves it, <kbd>Tab</kbd> goes to the next one, <kbd>U</kbd> takes a move back. " +
+          "<kbd>Enter</kbd> picks a unit and moves it, <kbd>Tab</kbd> jumps to the next unit that can still move or attack, <kbd>U</kbd> takes a move back. " +
           "To attack, <kbd>Enter</kbd> on an enemy marks it and lights your units that can join; " +
           "<kbd>Enter</kbd> on one of yours puts it in or out, <kbd>Enter</kbd> on the enemy again rolls the die. " +
-          "<kbd>N</kbd> ends the phase, <kbd>?</kbd> shows the rules. <kbd>Q</kbd> saves the war: this browser keeps it for your next visit.",
+          "<kbd>N</kbd> ends the phase, <kbd>?</kbd> shows the rules. <kbd>Q</kbd> saves the war: this browser keeps it for your next visit. " +
+          "The computer's units have one more attack and defence than a person's would. " +
+          "A war against it ends with a score: the result counts most, then the steps each side lost.",
         move: ARROWS,
         keys: [K("Enter", "Enter", "pick"), K("Tab", "Tab", "next"), K("u", "U", "undo"), K("n", "N", "phase"),
           K("Escape", "Esc", "back"), K("?", "?", "rules"), QUIT],
       },
       raid: {
-        kinds: ["Shooting"], v: "1.2", size: [640, 400], scores: true,
+        kinds: ["Shooting"], v: "1.2", size: [640, 400],
         line: "A gunship over fractal mountains, six missions.",
         about: "Six missions in the spirit of Comanche, from a radar post at dawn to a fortress at night. " +
           "A gun, rockets and guided missiles against trucks, tanks, flak, gunboats, missile sites and other gunships.",
@@ -49,11 +51,12 @@
         wide: true,
       },
       kart: {
-        kinds: ["Racing"], v: "1.2", size: [640, 400],
+        kinds: ["Racing"], v: "1.3", size: [640, 400],
         line: "Eight karts, four tracks, drifts and item boxes.",
         about: "Eight karts on four tracks: a meadow, a beach, an icy pass and a desert. " +
           "Hop into a bend and hold the drift until the sparks turn blue or orange, then let go for a push. " +
-          "A cup is four races, at 50, 100 or 150cc.",
+          "A cup is four races, at 50, 100 or 150cc. It scores a thousand for each point and a little for speed, " +
+          "times two at 100cc and three at 150cc.",
         alt: "kart: a red and a cyan kart side by side on a grey road, with more karts ahead and trees behind the barrier",
         help: "<kbd>↑</kbd> is the gas, <kbd>↓</kbd> the brake, <kbd>←</kbd> <kbd>→</kbd> steer. " +
           "<kbd>Space</kbd> hops, and held through a bend it drifts: let go when the sparks turn blue or orange for a push. " +
@@ -62,7 +65,7 @@
         keys: [K(" ", "Space", "hop"), K("x", "X", "item"), K("p", "P", "pause"), QUIT],
       },
       salvo: {
-        kinds: ["Shooting", "Arcade"], v: "1.3", size: [480, 270], scores: true,
+        kinds: ["Shooting", "Arcade"], v: "1.3", size: [480, 270],
         line: "A side-scrolling shooter, seven stages and their bosses.",
         about: "Seven stages in the spirit of Gradius, a boss at the end of each: a volcano, stone heads, crystals, living cells, " +
           "the sun, a high-speed maze and the fortress. Capsules light the power-up bar one step at a time.",
@@ -72,7 +75,7 @@
         keys: [K(" ", "Space", "fire"), K("z", "Z", "power"), K("p", "P", "pause"), K("Enter", "Enter", "start"), QUIT],
       },
       stack: {
-        kinds: ["Arcade", "Thinking"], v: "1.1", size: [480, 270], scores: true,
+        kinds: ["Arcade", "Thinking"], v: "1.1", size: [480, 270],
         line: "Falling blocks, a well ten wide, Korobeiniki playing.",
         about: "Seven pieces of four blocks in the spirit of Tetris. The pieces turn and kick off the walls, a bag of seven deals them. " +
           "Hold one, see the next five, drop soft or hard. Four rows at once and a T spun into its slot score more.",
@@ -84,7 +87,7 @@
         keys: [K(" ", "Space", "drop"), K("Enter", "Enter", "start"), K("p", "P", "pause"), QUIT],
       },
       again: {
-        kinds: ["Thinking"], v: "1.1", size: [480, 270],
+        kinds: ["Thinking"], v: "1.2", size: [480, 270],
         line: "A time-loop puzzle you solve with your own past.",
         about: "A life is a handful of steps in a small room. Then time starts over, and the self you just were walks beside you, " +
           "pressing the same keys. One of you stands on a plate while the next walks through the door it opens. Twenty rooms.",
@@ -92,13 +95,14 @@
         help: "Arrows step, <kbd>Space</kbd> waits a step. <kbd>Enter</kbd> lets the rest of the life run out: " +
           "then time starts over, and the self you just were walks beside you. " +
           "<kbd>U</kbd> takes back a step, <kbd>Backspace</kbd> the life, <kbd>R</kbd> the room. <kbd>N</kbd> and <kbd>P</kbd> change rooms. " +
-          "This browser keeps the rooms you have solved.",
+          "This browser keeps the rooms you have solved. A room solved the first time scores 100, " +
+          "10 more for each step its last life had left and 5 less for each take-back. The score goes to the top ten when you leave for the title.",
         move: ARROWS,
         keys: [K(" ", "Space", "wait"), K("Enter", "Enter", "run on"), K("u", "U", "undo"), K("Backspace", "⌫", "life"),
           K("r", "R", "room"), K("n", "N", "next"), K("p", "P", "back"), QUIT],
       },
       marble: {
-        kinds: ["Arcade"], v: "1.0", size: [640, 400], scores: true,
+        kinds: ["Arcade"], v: "1.0", size: [640, 400],
         line: "A glass ball down six courses that hang in the dark.",
         about: "A tribute to Marble Madness: six sloping courses against the clock. The ball gathers speed downhill, " +
           "flies off a ramp and breaks after a long fall. Steel balls shove it, green springs eat it, acid melts it.",
@@ -111,7 +115,7 @@
         keys: [K(" ", "Space", "start"), K("p", "P", "pause"), QUIT],
       },
       chomp: {
-        kinds: ["Arcade"], v: "1.0", size: [224, 288], scores: true,
+        kinds: ["Arcade"], v: "1.0", size: [224, 288],
         line: "Eat the dots while four chasers hunt you.",
         about: "In the spirit of Pac-Man: four chasers hunt you by the arcade's rules. One comes straight for you, one aims ahead, " +
           "one closes in from the other side, and one loses heart up close. The maze, the art and the sound are new.",
@@ -122,7 +126,7 @@
         keys: [K(" ", "Space", "start"), K("p", "P", "pause"), QUIT],
       },
       eliminator: {
-        kinds: ["Adventure"], v: "1.4", size: [640, 360], scores: true,
+        kinds: ["Adventure"], v: "1.4", size: [640, 360],
         line: "A dungeon by the Amar RPG rules, every roll shown.",
         about: "The maze beneath the royal castle of Amar: five levels up to the gate, and the Raven Demon guarding it. " +
           "Stances, double attacks, wounds, light, fear, and marks that raise your skills.",
@@ -140,7 +144,7 @@
         wide: true,
       },
       vector: {
-        kinds: ["Shooting", "Arcade"], v: "1.0", size: [640, 400], scores: true,
+        kinds: ["Shooting", "Arcade"], v: "1.0", size: [640, 400],
         line: "Glowing lines on black: sixteen webs and what climbs them.",
         about: "A tribute to Tempest. Sixteen webs seen down their length, a claw on the rim, and what climbs the lanes toward it: " +
           "flippers, tankers, spikers, fuseballs and pulsars. The lines add their light where they cross, as on a vector tube.",
@@ -152,14 +156,15 @@
         keys: [K(" ", "Space", "fire"), K("z", "Z", "zap"), K("p", "P", "pause"), QUIT],
       },
       blocks: {
-        kinds: ["Adventure"], v: "0.3", size: [640, 400],
+        kinds: ["Adventure"], v: "0.4", size: [640, 400],
         line: "A world of blocks to dig into and build on.",
         about: "In the spirit of Minecraft: a world grown from a seed, with hills, a sea, tunnels, groves and one great mountain. " +
-          "Dig into it and build on it, make planks, glass, brick and a pickaxe. Cats come to see who is there. There is nothing to win.",
+          "Dig into it and build on it, make planks, glass, brick and a pickaxe. Cats come to see who is there.",
         alt: "blocks: two cats on the grass above a blue bay, with a wooded hill and clouds behind them",
         help: "<kbd>W</kbd> and <kbd>S</kbd> walk, <kbd>A</kbd> and <kbd>D</kbd> sidestep, the arrows look round, <kbd>Space</kbd> jumps and swims. " +
           "<kbd>F</kbd> digs, <kbd>E</kbd> builds, <kbd>1</kbd> to <kbd>9</kbd> and <kbd>0</kbd> pick the kind, <kbd>C</kbd> lists the things to make. " +
-          "<kbd>P</kbd> pauses. This browser keeps your world; <kbd>N</kbd> on the title grows a new one.",
+          "<kbd>P</kbd> pauses. This browser keeps your world; <kbd>N</kbd> on the title grows a new one. " +
+          "Each visit scores a point for every block dug or built and ten for each thing made. <kbd>Q</kbd> leaves for the title with the score.",
         move: ARROWS,
         keys: [K("w", "W", "walk"), K("s", "S", "back"), K("a", "A", "left"), K("d", "D", "right"), K(" ", "Space", "jump"),
           K("f", "F", "dig"), K("e", "E", "build"), K("c", "C", "make"), K("Enter", "Enter"),
@@ -168,7 +173,7 @@
         wide: true,
       },
       jumpman: {
-        kinds: ["Arcade"], v: "1.1", size: [256, 192], scores: true,
+        kinds: ["Arcade"], v: "1.1", size: [256, 192],
         line: "Girders, ladders, ropes and bombs, five levels.",
         about: "A platformer in the spirit of Jumpman Junior. Take every bomb, jump the bullets, dodge the robots, " +
           "and do not fall too far. One bomb reveals hidden ladders, one takes girders away.",

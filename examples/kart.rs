@@ -3,7 +3,10 @@
 //! way that game painted it: every pixel under the horizon looks up its
 //! own spot on the track. On it stand the karts, the barriers and the
 //! boxes as 3D models, and the trees as pictures. A cup is four races of
-//! three laps, and the best finishes take the most points.
+//! three laps, and the best finishes take the most points. A cup ends
+//! with a score for the top ten: a thousand for each point, and a bonus
+//! for each second under 999 that the four races took, all of it times
+//! two in 100cc and times three in 150cc.
 //!
 //!     cargo run --release --example kart
 //!
@@ -26,7 +29,7 @@ const W: i32 = 640;
 const H: i32 = 400;
 const GAME: &str = "kart";
 /// The game's own version; the engine has its own.
-const VERSION: &str = "1.2";
+const VERSION: &str = "1.3";
 const FOCAL: f32 = W as f32 * 0.62;
 /// The world is this many metres a side, and as many cells.
 const SIZE: usize = 512;
@@ -1301,6 +1304,9 @@ struct Kart {
     grid: [usize; KARTS],
     points: [u32; KARTS],
     gained: [u32; KARTS],
+    /// Your seconds in the races of this cup, and the cup's score.
+    cup_time: f32,
+    score: u32,
     loose: Vec<Loose>,
     fx: Vec<Puff>,
     /// Seconds until each box is back.
@@ -1337,7 +1343,7 @@ impl Kart {
         let kept = |key: String| funkey::store::load(GAME, &key).and_then(|s| s.parse::<f32>().ok()).unwrap_or(0.0);
         let mut game = Kart {
             models: Models::new(&tex), track: Track::build(&PLANS[0], &tex), scene, tex, paint: Paint::new(), shade: Box::new([0; 16384]), spots: [[0.0; 6]; KARTS], class: 1, race: 0, cars: Vec::new(), place: [0; KARTS],
-            order: Vec::new(), grid: [0; KARTS], points: [0; KARTS], gained: [0; KARTS], loose: Vec::new(), fx: Vec::new(), crates: Vec::new(), mode: Mode::Title,
+            order: Vec::new(), grid: [0; KARTS], points: [0; KARTS], gained: [0; KARTS], cup_time: 0.0, score: 0, loose: Vec::new(), fx: Vec::new(), crates: Vec::new(), mode: Mode::Title,
             time: 0.0, clock: 0.0, count: 0.0, timer: 0.0, rev: 0.0, cam: 0.0, eye: 0, auto: false, flash: 0.0, wrong: 0.0, note: None, lap_best: 0.0,
             best: [0, 1, 2, 3].map(|i| kept(format!("lap{i}"))), cups: [0, 1, 2].map(|i| kept(format!("cup{i}")) as u32),
             audio: Audio::off(), snd: Sounds::new(), rng: Rng::from_time(),
@@ -1387,7 +1393,7 @@ impl Kart {
 
     /// A new cup: you start the first race from the back.
     fn cup(&mut self) {
-        (self.points, self.grid, self.eye) = ([0; KARTS], [1, 2, 3, 4, 5, 6, 7, 0], 0);
+        (self.points, self.grid, self.eye, self.cup_time) = ([0; KARTS], [1, 2, 3, 4, 5, 6, 7, 0], 0, 0.0);
         self.audio.stop(3);
         self.begin(0);
     }
@@ -1670,6 +1676,7 @@ impl Kart {
     /// and everyone gets the points of the place.
     fn tally(&mut self) {
         self.rank();
+        self.cup_time += self.cars[0].done.unwrap_or(self.clock);
         self.order = (0..KARTS).collect();
         self.order.sort_by_key(|&n| self.place[n]);
         for (p, &n) in self.order.iter().enumerate() {
@@ -1940,6 +1947,8 @@ impl Game for Kart {
                             if !cfg!(test) { funkey::store::save(GAME, &format!("cup{}", self.class), &place.to_string()); }
                         }
                         (self.mode, self.timer) = (Mode::Cup, 0.0);
+                        self.score = cup_score(self.class, self.points[0], self.cup_time);
+                        if !cfg!(test) { funkey::scores::record(GAME, self.score); }
                         self.audio.play_loop(3, &self.snd.title, 0.6);
                     }
                 }
@@ -1978,9 +1987,16 @@ impl Game for Kart {
                 let me = by.iter().position(|&n| n == 0).unwrap_or(KARTS - 1);
                 let title = match me { 0 => "THE GOLD CUP IS YOURS".to_string(), 1 => "THE SILVER CUP IS YOURS".to_string(), 2 => "THE BRONZE CUP IS YOURS".to_string(), p => format!("{} IN THE CUP", nth(p)) };
                 self.table(f, &title, &by, |_, n| format!("{:3}", self.points[n]));
+                ink_mid(f, 328, &format!("SCORE {}", self.score), GOLD, 2);
             }
         }
     }
+}
+
+/// A cup's score: a thousand for each point, and a second under 999 is
+/// one more, times the class counted from one.
+fn cup_score(class: usize, points: u32, seconds: f32) -> u32 {
+    (class as u32 + 1) * (1000 * points + 999u32.saturating_sub(seconds as u32))
 }
 
 /// The game as it is played: with sound, and from the track asked for.
@@ -2235,6 +2251,9 @@ mod tests {
         }
         assert_eq!(game.mode, Mode::Cup, "four races in twenty minutes");
         assert_eq!(game.points.iter().sum::<u32>(), 4 * POINTS.iter().sum::<u32>());
+        assert!(game.cup_time > 60.0, "four races take minutes, not {} seconds", game.cup_time);
+        assert_eq!(game.score, cup_score(2, game.points[0], game.cup_time));
+        assert!(cup_score(0, 10, 0.0) < cup_score(0, 11, 999.0), "a point beats any time");
         assert_eq!(seen, [Mode::Grid, Mode::Race, Mode::Flag, Mode::Table], "every screen was drawn");
         game.draw(&mut f);
         game.update(&input, 1.0 / 30.0);

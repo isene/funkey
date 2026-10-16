@@ -72,10 +72,7 @@
     }
     $("noscores").hidden = list.children.length > 0;
   };
-  if (g.scores) {
-    $("top").hidden = false;
-    fetch(R.SCORES + name).then(r => r.ok ? r.text() : "").then(showScores).catch(() => {});
-  }
+  fetch(R.SCORES + name).then(r => r.ok ? r.text() : "").then(showScores).catch(() => {});
 
   // Comments, newest first.
   const showTalk = list => {
@@ -128,11 +125,11 @@
       const at = m.indexOf("\n");
       const key = m.slice(5, at);
       if (at > 0 && key.startsWith(name + "/")) R.store("keep:" + key, m.slice(at + 1));
-    } else if (m === "list" && g.scores) {
+    } else if (m === "list") {
       const n = R.store("funkey-name") || R.store("stack-name");
       if (n) game.send("name " + n);
       fetch(R.SCORES + name).then(answer).catch(() => {});
-    } else if (m.startsWith("score ") && g.scores) {
+    } else if (m.startsWith("score ")) {
       const line = m.slice(6);
       R.store("funkey-name", line.slice(0, 3));
       fetch(R.SCORES + name, { method: "POST", body: line }).then(answer).catch(() => {});

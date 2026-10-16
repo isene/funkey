@@ -40,7 +40,7 @@ want "eight digits"                           400 "Send: ABC 12345|" "$(req POST
 want "a second line"                          400 "Send: ABC 12345|" "$(req POST game=salvo 1.1.2.2 $'GEI 5\nBAD 9')"
 want "shell text"                             400 "Send: ABC 12345|" "$(req POST game=salvo 1.1.2.3 'GEI 5;id')"
 want "too long"                               413 "Too long.|"       "$(req POST game=salvo 1.1.2.4 "$(printf 'A%.0s' {1..70})")"
-want "a game not on the list"                 400 "Which game?|"     "$(req GET game=kart 1.1.1.1 '')"
+want "a game not on the list"                 400 "Which game?|"     "$(req GET game=doom 1.1.1.1 '')"
 want "a path as the game"                     400 "Which game?|"     "$(req GET 'game=../../etc/passwd' 1.1.1.1 '')"
 want "a game name with more behind it"        400 "Which game?|"     "$(req GET game=salvox 1.1.1.1 '')"
 want "no game"                                400 "Which game?|"     "$(req GET '' 1.1.1.1 '')"

@@ -332,7 +332,8 @@ pub fn sign(fr: &mut Frame, bx: i32, by: i32, w: i32, h: i32, kind: Kind, field:
 }
 
 /// A counter, 26 pixels square, centred at (x, y): the marks for its
-/// size, the unit's sign, and its attack, defence and movement.
+/// size, the unit's sign, and its attack, defence and movement, a digit
+/// each.
 pub fn counter(fr: &mut Frame, x: i32, y: i32, l: &Look) {
     const N: i32 = 26;
     let (x0, y0) = (x - N / 2, y - N / 2);
@@ -357,9 +358,14 @@ pub fn counter(fr: &mut Frame, x: i32, y: i32, l: &Look) {
         let px = mx + 4 * k;
         for (dx, dy) in [(0, 0), (2, 0), (1, 1), (0, 2), (2, 2)] { fr.put(px + dx, y0 + 3 + dy, ink); }
     }
-    sign(fr, x0 + 4, y0 + 7, 18, 11, l.kind, mix(paper, WHITE, 0.35), ink);
-    let tw = Frame::text_width(&l.numbers, false, 1) - 1;
-    fr.text(x - tw / 2, y0 + 19, &l.numbers, ink);
+    sign(fr, x0 + 4, y0 + 7, 18, 9, l.kind, mix(paper, WHITE, 0.35), ink);
+    // Attack, defence and movement in the 5 by 7 letters, a dot between.
+    // A 10 (a panzer corps the computer plays) takes the small letters.
+    for (i, d) in l.numbers.split('-').enumerate() {
+        let dx = x0 + 3 + 8 * i as i32;
+        if d.len() > 1 { fr.text(dx - 1, y0 + 18, d, ink); } else { fr.text_big(dx, y0 + 17, d, ink); }
+        if i > 0 { fr.put(dx - 2, y0 + 20, ink); }
+    }
     let edge = |fr: &mut Frame, k: i32, c: Rgb| {
         fr.hline(x0 + k, y0 + k, N - 2 * k, c);
         fr.hline(x0 + k, y0 + N - 1 - k, N - 2 * k, c);

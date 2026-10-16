@@ -110,9 +110,12 @@
       fk.fk_key(c, 0);
     });
     field.addEventListener("input", () => { field.value = ""; });
-    field.addEventListener("focus", () => box.classList.add("on"));
+    // A game that waits for a key draws no new picture on a click, so the
+    // banner comes and goes with the focus here.
+    field.addEventListener("focus", () => { box.classList.add("on"); paint(); });
     field.addEventListener("blur", () => {
       box.classList.remove("on");
+      paint();
       for (const c of held.values()) fk.fk_key(c, 0);
       held.clear();
     });
@@ -151,22 +154,27 @@
       new IntersectionObserver(es => { seen = es[es.length - 1].isIntersecting; go(); }).observe(box);
     }
 
+    // The game's last picture, and over it the banner until the game has
+    // the keys.
+    function paint() {
+      fit();
+      ctx.drawImage(off, 0, 0, canvas.width, canvas.height);
+      if (document.activeElement === field || tapped) return;
+      ctx.fillStyle = "rgba(0,0,0,0.6)";
+      ctx.fillRect(0, canvas.height * 0.42, canvas.width, canvas.height * 0.16);
+      ctx.fillStyle = "#ffd040";
+      ctx.font = "bold " + Math.round(canvas.height / 16) + "px monospace";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(touch ? "TAP TO PLAY" : "CLICK TO PLAY", canvas.width / 2, canvas.height / 2);
+    }
+
     function tick(ms) {
       if (!seen) { running = false; return; }
       if (fk.fk_frame(ms)) {
-        fit();
         image.data.set(new Uint8ClampedArray(fk.memory.buffer, fk.fk_pixels(), w * h * 4));
         octx.putImageData(image, 0, 0);
-        ctx.drawImage(off, 0, 0, canvas.width, canvas.height);
-        if (document.activeElement !== field && !tapped) {
-          ctx.fillStyle = "rgba(0,0,0,0.6)";
-          ctx.fillRect(0, canvas.height * 0.42, canvas.width, canvas.height * 0.16);
-          ctx.fillStyle = "#ffd040";
-          ctx.font = "bold " + Math.round(canvas.height / 16) + "px monospace";
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-          ctx.fillText(touch ? "TAP TO PLAY" : "CLICK TO PLAY", canvas.width / 2, canvas.height / 2);
-        }
+        paint();
       }
       pump();
       drain();

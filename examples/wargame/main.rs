@@ -9,7 +9,7 @@
 //! move; U takes back a move; N ends the phase. To attack, press Enter on
 //! an enemy, then Enter on your units next to it to leave some out, and
 //! Enter on the enemy again to roll. ? shows the rules, Q saves and
-//! leaves.
+//! leaves. A war against the computer ends with a score for the top ten.
 //!
 //! `WARGAME_BOT=<seed>` plays a whole war, computer against computer,
 //! with no terminal and prints how it went. `WARGAME_BOARD=<file.ppm>`
@@ -41,7 +41,7 @@ const TOP: i32 = 18;
 const MINI: (i32, i32) = (540, 520);
 const GAME: &str = "wargame";
 /// The game's own version; the engine has its own.
-const VERSION: &str = "0.2";
+const VERSION: &str = "0.3";
 
 const SCENARIOS: &[&Scenario] = &[&desert::SCENARIO, &stalingrad::SCENARIO];
 
@@ -93,6 +93,9 @@ struct Wargame {
     repeat: f32,
     help_page: usize,
     time: f32,
+    /// The score of a war just over, and how long it has been over.
+    score: Option<u32>,
+    over_t: f32,
 }
 
 fn seed() -> u64 { Rng::from_time().next_u32() as u64 | 1 }
@@ -125,6 +128,8 @@ impl Wargame {
             repeat: 0.0,
             help_page: 0,
             time: 0.0,
+            score: None,
+            over_t: 0.0,
         }
     }
 
@@ -154,7 +159,10 @@ impl Wargame {
         }
     }
 
-    fn start(&mut self, scen: usize, human: [bool; 2], war: War) {
+    fn start(&mut self, scen: usize, human: [bool; 2], mut war: War) {
+        // The computer plays no better than it does, so against a person
+        // its units are one stronger.
+        war.boost = [0, 1].map(|s| (!human[s] && human[1 - s]) as i32);
         self.board_for(scen);
         self.scen = scen;
         self.human = human;
@@ -208,7 +216,12 @@ impl Wargame {
                 self.look_at(h, true);
             }
         }
-        if self.war().over { self.screen = Screen::Over; }
+        if self.war().over {
+            self.screen = Screen::Over;
+            self.over_t = 0.0;
+            self.score = score(self.war(), self.human);
+            if let Some(s) = self.score.filter(|_| !cfg!(test)) { scores::record(GAME, s); }
+        }
         self.save();
     }
 
@@ -555,6 +568,17 @@ impl Wargame {
         let who = if self.human[w.side] { "" } else { "  (COMPUTER)" };
         line(fr, &mut y, &format!("{} {}{}", w.sc.sides[w.side], w.phase.name(), who), WHITE);
         line(fr, &mut y, &format!("POINTS {} {}  {} {}", w.sc.sides[0], w.vp(0), w.sc.sides[1], w.vp(1)), SOFT);
+        // The units still to play, so a lone one is not forgotten.
+        if self.human[w.side] && !w.over {
+            let left = w.on_map(w.side).filter(|&u| self.can_act(u)).count();
+            let what = if w.phase == Phase::Combat { "ATTACK" } else { "MOVE" };
+            let s = match left {
+                0 => format!("NONE LEFT TO {what}: N GOES ON"),
+                1 => format!("1 UNIT CAN {what}: TAB FINDS IT"),
+                n => format!("{n} UNITS CAN {what}: TAB FINDS THEM"),
+            };
+            line(fr, &mut y, &s, if left > 0 { GOLD } else { SOFT });
+        }
         y += 6;
         fr.hline(x, y, W - x - 12, 0x3a4048);
         y += 8;
@@ -623,7 +647,7 @@ impl Wargame {
         }
         let keys = if self.human[w.side] {
             match w.phase {
-                Phase::Combat => ["ENTER ON AN ENEMY MARKS IT", "N NEXT PHASE  ? RULES  Q QUIT"],
+                Phase::Combat => ["ENTER ON AN ENEMY MARKS IT  TAB NEXT", "N NEXT PHASE  ? RULES  Q QUIT"],
                 _ => ["ENTER PICKS AND MOVES  TAB NEXT", "U UNDO  N NEXT PHASE  ? RULES"],
             }
         } else {
@@ -735,8 +759,22 @@ impl Wargame {
         fr.text_centered(cx, 250, w.result(), GOLD, true, 2);
         fr.text_centered(cx, 290, &format!("{} HOLD {} POINTS, {} {}", w.sc.sides[0], w.vp(0), w.sc.sides[1], w.vp(1)), TEXT, true, 1);
         fr.text_centered(cx, 305, &format!("STEPS LOST: {} {}, {} {}", w.sc.sides[0], w.lost[0], w.sc.sides[1], w.lost[1]), TEXT, true, 1);
-        fr.text_centered(cx, 340, "ANY KEY", SOFT, true, 1);
+        if let Some(s) = self.score { fr.text_centered(cx, 325, &format!("SCORE {s}"), GOLD, true, 2); }
+        fr.text_centered(cx, 350, "ANY KEY", SOFT, true, 1);
     }
+}
+
+/// The score of a war one person fought against the computer: ten
+/// thousand for each step of the result from the worst for that side,
+/// 100 for each step the enemy lost, less 50 for each of the person's own.
+fn score(w: &War, human: [bool; 2]) -> Option<u32> {
+    if human[0] == human[1] { return None; }
+    let me = human[1] as usize;
+    let n = w.sc.levels.len();
+    let vp = w.vp(0);
+    let i = w.sc.levels.iter().position(|l| vp >= l.0).unwrap_or(n - 1);
+    let rank = (if me == 0 { n - 1 - i } else { i }) as i32;
+    Some((10_000 * (rank + 1) + 100 * w.lost[1 - me] - 50 * w.lost[me]).max(1) as u32)
 }
 
 /// Cut a line into parts of at most `n` characters, at spaces.
@@ -761,6 +799,8 @@ const HELP: &[&[&str]] = &[
         "One unit to a hex. A full unit has two steps; a hit takes one off and the unit is weaker on its reduced side, shown by a pale band.",
         "The numbers on a counter are attack, defence and movement.",
         "Hold the cities with points when the last turn ends. The panel shows what each side holds.",
+        "Against a person the computer's units have one more attack and defence; the counters show it.",
+        "Against the computer the war ends with a score for the top ten. The result counts most, then the steps each side lost.",
     ],
     &[
         "MOVING",
@@ -801,6 +841,10 @@ impl Game for Wargame {
                 Flow::Wait
             }
             Screen::Over => {
+                // The game runs on a moment, so the top ten can ask for
+                // initials; keys before that are not taken.
+                self.over_t += dt;
+                if self.over_t < 1.2 { return Flow::Continue; }
                 if input.any_pressed() {
                     self.screen = Screen::Title;
                     self.war = None;
@@ -826,6 +870,8 @@ impl Game for Wargame {
 /// `stop` (counted from 1) or to the end, with a line for each turn.
 fn bot(scen: usize, seed: u64, stop: usize, quiet: bool) -> War {
     let mut w = War::new(SCENARIOS[scen], seed);
+    // `WARGAME_BOOST=<side>` makes that side one stronger, as against a person.
+    if let Some(s) = std::env::var("WARGAME_BOOST").ok().and_then(|s| s.parse::<usize>().ok()).filter(|&s| s < 2) { w.boost[s] = 1; }
     while !w.over && w.turn + 1 < stop {
         match w.phase {
             Phase::Move | Phase::Exploit => {
@@ -854,7 +900,9 @@ fn bot(scen: usize, seed: u64, stop: usize, quiet: bool) -> War {
 #[cfg(not(target_arch = "wasm32"))]
 fn paint(scen: usize, w: War, path: &str) {
     let mut g = Wargame::new();
+    let boost = w.boost;
     g.start(scen, [true, true], w);
+    if let Some(w) = g.war.as_mut() { w.boost = boost; }
     let w = g.war();
     let mut fr = Frame::new(g.board.w, g.board.h);
     fr.px.copy_from_slice(&g.board.px);
@@ -928,6 +976,34 @@ mod tests {
     }
 
     fn ring(w: &War, h: usize) -> Vec<usize> { w.map.around(h).map(|(_, n)| n).collect() }
+
+    #[test]
+    fn the_computer_is_one_stronger_against_a_person() {
+        let mut g = Wargame::new();
+        g.start(0, [true, false], War::new(SCENARIOS[0], 7));
+        let w = g.war();
+        assert_eq!(w.boost, [0, 1]);
+        let u = w.on_map(1).next().unwrap();
+        assert_eq!((w.attack(u), w.defence(u)), (w.kit(u).a + 1, w.kit(u).d + 1));
+        g.start(0, [true, true], War::new(SCENARIOS[0], 7));
+        assert_eq!(g.war().boost, [0, 0], "two players play even");
+    }
+
+    #[test]
+    fn the_result_counts_most_in_the_score() {
+        let mut w = War::new(SCENARIOS[0], 7);
+        assert_eq!(score(&w, [true, true]), None, "two players get no score");
+        assert_eq!(score(&w, [false, false]), None);
+        // At the start the Axis holds Derna, 1 point: an Allied victory.
+        let (axis, allies) = (score(&w, [true, false]).unwrap(), score(&w, [false, true]).unwrap());
+        assert_eq!((axis, allies), (20_000, 40_000));
+        w.lost = [4, 2];
+        assert_eq!(score(&w, [true, false]), Some(20_000 + 200 - 200));
+        assert_eq!(score(&w, [false, true]), Some(40_000 + 400 - 100));
+        // Every point to the Axis: their decisive victory.
+        w.owner.iter_mut().for_each(|o| *o = 0);
+        assert_eq!(score(&w, [true, false]), Some(50_000 + 200 - 200));
+    }
 
     #[test]
     fn odds_follow_the_numbers_and_the_tanks() {

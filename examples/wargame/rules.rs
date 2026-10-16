@@ -133,6 +133,9 @@ pub struct War {
     /// Steps each side has lost.
     pub lost: [i32; 2],
     pub over: bool,
+    /// Added to the attack and defence of each side's units: the
+    /// computer's side gets 1 against a person.
+    pub boost: [i32; 2],
 }
 
 impl War {
@@ -151,6 +154,7 @@ impl War {
             log: Vec::new(),
             lost: [0, 0],
             over: false,
+            boost: [0, 0],
         };
         for (f, force) in sc.forces.iter().enumerate() {
             w.units.push(Unit { f, hex: None, steps: 2, mp: 0, moved: false, fought: false, hungry: 0 });
@@ -188,12 +192,12 @@ impl War {
 
     pub fn attack(&self, u: usize) -> i32 {
         let k = self.kit(u);
-        if self.units[u].steps >= 2 { k.a } else { (k.a + 1) / 2 }
+        self.boost[self.side_of(u)] + if self.units[u].steps >= 2 { k.a } else { (k.a + 1) / 2 }
     }
 
     pub fn defence(&self, u: usize) -> i32 {
         let k = self.kit(u);
-        if self.units[u].steps >= 2 { k.d } else { (2 * k.d + 1) / 3 }
+        self.boost[self.side_of(u)] + if self.units[u].steps >= 2 { k.d } else { (2 * k.d + 1) / 3 }
     }
 
     /// Movement points for a whole movement phase, after the weather and

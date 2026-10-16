@@ -99,7 +99,7 @@
   fetch(R.SCORES + "all").then(r => r.ok ? r.text() : "").then(t => {
     for (const line of t.split("\n")) {
       const [g, who, score] = line.split(" ");
-      if (cards[g] && R.GAMES[g].scores && who && score) cards[g].best.textContent = "Best " + who + " " + Number(score).toLocaleString();
+      if (cards[g] && who && score) cards[g].best.textContent = "Best " + who + " " + Number(score).toLocaleString();
     }
   }).catch(() => {});
 

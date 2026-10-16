@@ -30,7 +30,7 @@ require "digest"
 # in, so the default goes by where this file really is, not by the link
 # in cgi-bin and not by a home folder.
 DIR = ENV["FUNKEY_SCORES"] || File.expand_path("../../funkey-scores", File.dirname(File.realpath(__FILE__)))
-GAMES = %w[stack drive eliminator gems invaders jumpman marble salvo vector chomp raid].freeze
+GAMES = %w[stack drive eliminator gems invaders jumpman marble salvo vector chomp raid kart again blocks wargame].freeze
 KEEP = 10
 WAIT = 15
 # More recent addresses than this means a flood: turn scores away.
