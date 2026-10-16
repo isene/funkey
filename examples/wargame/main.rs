@@ -37,6 +37,8 @@ const H: i32 = 600;
 const MAP_W: i32 = 700;
 /// The legend's strip over the map.
 const TOP: i32 = 18;
+/// The most room the small board on the title may take.
+const MINI: (i32, i32) = (540, 520);
 const GAME: &str = "wargame";
 /// The game's own version; the engine has its own.
 const VERSION: &str = "0.2";
@@ -69,6 +71,8 @@ struct Wargame {
     /// True for a side a person plays.
     human: [bool; 2],
     board: Frame,
+    /// The board small, for the title.
+    mini: Frame,
     board_of: usize,
     cursor: usize,
     view: (i32, i32),
@@ -96,14 +100,15 @@ fn seed() -> u64 { Rng::from_time().next_u32() as u64 | 1 }
 impl Wargame {
     fn new() -> Wargame {
         let sc = SCENARIOS[0];
-        let map = map::Map::new(sc);
+        let (board, mini) = draw::boards(sc, &map::Map::new(sc), MINI.0, MINI.1);
         Wargame {
             screen: Screen::Title,
             menu: 0,
             scen: 0,
             war: None,
             human: [true, false],
-            board: draw::board(sc, &map),
+            board,
+            mini,
             board_of: 0,
             cursor: 0,
             view: (0, 0),
@@ -144,7 +149,7 @@ impl Wargame {
     /// The painted board of a scenario, made when it changes.
     fn board_for(&mut self, scen: usize) {
         if self.board_of != scen {
-            self.board = draw::board(SCENARIOS[scen], &map::Map::new(SCENARIOS[scen]));
+            (self.board, self.mini) = draw::boards(SCENARIOS[scen], &map::Map::new(SCENARIOS[scen]), MINI.0, MINI.1);
             self.board_of = scen;
         }
     }
@@ -674,13 +679,13 @@ impl Wargame {
 
     fn draw_title(&mut self, fr: &mut Frame) {
         fr.clear(0x14171c);
-        // The board, small, as the picture behind the menu.
-        let b = &self.board;
-        let (ox, oy, k) = (W - 430, 70, (b.w + 409) / 410);
-        for y in 0..(b.h / k).min(H - oy - 20) {
-            for x in 0..(b.w / k).min(410) {
-                fr.put(ox + x, oy + y, tint(b.get(x * k, y * k), 0.75));
-            }
+        // The board, small, beside the menu.
+        let m = &self.mini;
+        let (ox, oy) = (W - 20 - m.w, 60 + (MINI.1 - m.h) / 2);
+        fr.rect(ox - 2, oy - 2, m.w + 4, m.h + 4, 0x3a4048);
+        for y in 0..m.h {
+            let row = &m.px[(y * m.w) as usize..((y + 1) * m.w) as usize];
+            fr.px[((oy + y) * fr.w + ox) as usize..][..m.w as usize].copy_from_slice(row);
         }
         fr.fancy_text(260, 40, "WARGAME", 6, self.time, (0xf3e3b0, 0xb07a30));
         let sc = SCENARIOS[self.scen];

@@ -77,8 +77,17 @@ fn thick(fr: &mut Frame, a: (f32, f32), b: (f32, f32), w: i32, c: Rgb) {
     }
 }
 
-/// The board as it never changes: ground, rivers, cities and names.
-pub fn board(sc: &Scenario, map: &Map) -> Frame {
+/// The board as it never changes, and the same board small for the
+/// title, at most `mw` by `mh` pixels.
+pub fn boards(sc: &Scenario, map: &Map, mw: i32, mh: i32) -> (Frame, Frame) {
+    let mut b = ground(sc, map);
+    let small = mini(sc, map, &b, mw, mh);
+    names(&mut b, sc, map);
+    (b, small)
+}
+
+/// The ground, the grid, the coast and the rivers.
+fn ground(sc: &Scenario, map: &Map) -> Frame {
     let (w, h) = map.pixels();
     let mut fr = Frame::new(w, h);
     fr.clear(OUTSIDE);
@@ -163,6 +172,11 @@ pub fn board(sc: &Scenario, map: &Map) -> Frame {
     for &(a, b) in &map.river_lines {
         thick(&mut fr, a, b, 3, RIVER);
     }
+    fr
+}
+
+/// The cities and their names.
+fn names(fr: &mut Frame, sc: &Scenario, map: &Map) {
     for c in sc.cities {
         let i = map.at(c.col, c.row).unwrap();
         let (cx, cy) = map.center(i);
@@ -185,6 +199,62 @@ pub fn board(sc: &Scenario, map: &Map) -> Frame {
         let (tx, ty) = (x - tw / 2, y + 8);
         fr.rect(tx - 1, ty - 1, tw + 1, 7, 0xf1ead2);
         fr.text(tx, ty, &name, if c.vp > 0 { 0x9a1b10 } else { INK });
+    }
+}
+
+/// The ground shrunk smoothly, each small pixel the mean of the big ones
+/// under it, then sharp on top: the rivers, the cities, the forces of the
+/// first turn and the names of the cities with points.
+fn mini(sc: &Scenario, map: &Map, g: &Frame, mw: i32, mh: i32) -> Frame {
+    let s = (mw as f32 / g.w as f32).min(mh as f32 / g.h as f32);
+    let (w, h) = ((g.w as f32 * s) as i32, (g.h as f32 * s) as i32);
+    let mut fr = Frame::new(w, h);
+    let k = 1.0 / s;
+    for y in 0..h {
+        let (y0, y1) = (y as f32 * k, (y + 1) as f32 * k);
+        for x in 0..w {
+            let (x0, x1) = (x as f32 * k, (x + 1) as f32 * k);
+            let mut sum = [0.0f32; 4];
+            for sy in y0 as i32..(y1.ceil() as i32).min(g.h) {
+                let wy = y1.min(sy as f32 + 1.0) - y0.max(sy as f32);
+                for sx in x0 as i32..(x1.ceil() as i32).min(g.w) {
+                    let wt = wy * (x1.min(sx as f32 + 1.0) - x0.max(sx as f32));
+                    let (r, gr, b) = parts(g.px[(sy * g.w + sx) as usize]);
+                    sum[0] += wt * r as f32;
+                    sum[1] += wt * gr as f32;
+                    sum[2] += wt * b as f32;
+                    sum[3] += wt;
+                }
+            }
+            let c = |v: f32| (v / sum[3]).round().clamp(0.0, 255.0) as u8;
+            fr.px[(y * w + x) as usize] = rgb(c(sum[0]), c(sum[1]), c(sum[2]));
+        }
+    }
+    let at = |(x, y): (f32, f32)| (x * s, y * s);
+    let hex = |col, row| {
+        let (x, y) = at(map.center(map.at(col, row).unwrap()));
+        (x as i32, y as i32)
+    };
+    for &(a, b) in &map.river_lines {
+        thick(&mut fr, at(a), at(b), 2, RIVER);
+    }
+    for c in sc.cities {
+        let (x, y) = hex(c.col, c.row);
+        let r = 1 + c.size.min(2) as i32;
+        fr.rect(x - r, y - r, 2 * r, 2 * r, INK);
+    }
+    for f in sc.forces.iter().filter(|f| f.turn == 1) {
+        let n = &sc.nations[f.kit.nat];
+        let (x, y) = hex(f.col, f.row);
+        fr.rect(x - 3, y - 3, 7, 7, n.ink);
+        fr.rect(x - 2, y - 2, 5, 5, n.paper);
+    }
+    for c in sc.cities.iter().filter(|c| c.vp > 0) {
+        let (x, y) = hex(c.col, c.row);
+        let tw = Frame::text_width(c.name, false, 1);
+        let (tx, ty) = (x - tw / 2, y + 5);
+        fr.rect(tx - 1, ty - 1, tw + 1, 7, 0xf1ead2);
+        fr.text(tx, ty, c.name, 0x9a1b10);
     }
     fr
 }
