@@ -47,7 +47,9 @@ a { color: var(--orange); }
 
 /* The lobby. */
 .intro { padding: 2.6rem 0 1.4rem; }
-.intro h1 { font-size: clamp(1.9rem, 4.5vw, 3rem); line-height: 1.1; margin: 0 0 0.5rem; letter-spacing: -0.01em;
+.intro h1 { font-size: clamp(1.9rem, 4.5vw, 3rem); line-height: 1.1; margin: 0 0 0.35rem; letter-spacing: -0.01em;
+  /* The gradient fills only the box: room below the line for a g. */
+  padding-bottom: 0.15em;
   background: linear-gradient(90deg, var(--gold), var(--orange)); -webkit-background-clip: text; background-clip: text;
   color: transparent; }
 .intro p { color: var(--dim); margin: 0; max-width: 640px; font-size: 1.05rem; }

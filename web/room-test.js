@@ -63,6 +63,18 @@ server.listen(0, "127.0.0.1", async () => {
     await page.waitForSelector(".card");
     check("the lobby shows twelve games", (await page.$$(".card")).length === 12);
     check("the lobby greets", (await page.textContent("h1")) === "Welcome to the funkey game room.");
+    // The heading's gradient is painted only inside its box: the tail of
+    // the g in "funkey" once fell outside it. Look for gold just under
+    // the line.
+    const box = await page.$eval("h1", h => {
+      const r = h.getBoundingClientRect(), s = getComputedStyle(h);
+      return { x: r.x, y: r.y + parseFloat(s.lineHeight), w: r.width };
+    });
+    const strip = await page.screenshot({ clip: { x: box.x, y: box.y, width: box.w, height: 6 } });
+    const { data, info } = await require("sharp")(strip).raw().toBuffer({ resolveWithObject: true });
+    let tail = 0;
+    for (let i = 0; i < data.length; i += info.channels) if (data[i] > 180 && data[i + 1] > 100 && data[i + 2] < 120) tail++;
+    check("the g in the heading has its tail", tail > 0, tail);
     await page.fill("#search", "tetris");
     const found = await page.$$eval(".card:not([hidden])", e => e.map(x => x.dataset.name));
     check("a search finds stack by what it is like", found.join() === "stack", found);
