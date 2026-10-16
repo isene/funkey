@@ -33,6 +33,9 @@ pub struct Kit {
     pub m: i32,
     /// "PANZER CORPS", for the side panel.
     pub what: &'static str,
+    /// The marks over the sign: 1 a brigade, 2 a division, 3 a corps, 4
+    /// an army.
+    pub size: u8,
 }
 
 /// One unit of the order of battle. On turn 1 it starts at its hex; a
@@ -55,6 +58,8 @@ pub struct City {
     pub vp: i32,
     /// The side that holds it at the start.
     pub owner: usize,
+    /// A harbour: supply comes in by sea for the side that holds it.
+    pub port: bool,
 }
 
 /// A river as points of longitude and latitude, from its source down.
@@ -62,6 +67,10 @@ pub struct River {
     pub name: &'static str,
     pub points: &'static [(f32, f32)],
 }
+
+/// How the ground looks and what it is called.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Land { Steppe, Desert }
 
 pub struct Scenario {
     pub name: &'static str,
@@ -72,6 +81,7 @@ pub struct Scenario {
     /// One string per row of hexes, one character per hex:
     /// `.` clear, `f` forest, `r` rough, `m` marsh, `^` mountains, `~` sea.
     pub ground: &'static [&'static str],
+    pub land: Land,
     /// Where the map lies on the globe: the longitude at its left edge,
     /// the latitude at its top, and degrees of each per pixel.
     pub geo: (f32, f32, f32, f32),
@@ -88,6 +98,8 @@ pub struct Scenario {
     pub posture: [&'static str; 2],
     /// True for a hex on a side's supply edge.
     pub supply: fn(side: usize, col: i32, row: i32) -> bool,
+    /// How many hexes supply runs from the edge or a port, 0 for no limit.
+    pub range: i32,
     pub forces: &'static [Force],
     /// The result at the end, by the victory points side 0 holds: the
     /// first line whose number it reaches.

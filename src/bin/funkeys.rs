@@ -29,8 +29,8 @@ const GAMES: &[Game] = &[
     Game {
         name: "wargame",
         kind: "Hex wargame",
-        blurb: "Stalingrad 1942, turn by turn",
-        keys: "The arrows move the cursor. Enter picks a unit, then the hex it\ngoes to; Tab finds the next one, U takes a move back, N ends the\nphase. To attack: Enter on an enemy, Enter on your units to leave\nsome out, Enter on the enemy again to roll. ? shows the rules,\nQ saves and leaves.\n\nFourteen turns from the summer drive to the Volga to the Soviet\nanswer in the snow. Hold the cities with points at the end.",
+        blurb: "North Africa and Stalingrad, 1942",
+        keys: "The arrows move the cursor. Enter picks a unit, then the hex it\ngoes to; Tab finds the next one, U takes a move back, N ends the\nphase. To attack: Enter on an enemy, Enter on your units to leave\nsome out, Enter on the enemy again to roll. ? shows the rules,\nQ saves and leaves.\n\nRommel's drive for the Nile, or the drive for the Volga and the\nSoviet answer in the snow. Hold the cities with points at the end.",
         shot: include_bytes!("../../docs/img/wargame.png"),
     },
     Game {

@@ -3,7 +3,7 @@
 //! SE, S, SW, NW. A river runs along hex sides, so a unit crosses it when
 //! it steps over one of those sides.
 
-use crate::scenario::Scenario;
+use crate::scenario::{Land, Scenario};
 use std::collections::HashMap;
 
 /// A hex's corner radius, and its height, in pixels.
@@ -25,14 +25,21 @@ impl Ground {
         }
     }
 
-    pub fn name(self) -> &'static str {
-        match self {
-            Ground::Clear => "CLEAR",
-            Ground::Forest => "FOREST",
-            Ground::Rough => "ROUGH",
-            Ground::Marsh => "MARSH",
-            Ground::Mountain => "MOUNTAINS",
-            Ground::Sea => "SEA",
+    /// What the ground is called in a scenario's land: the desert has
+    /// farmland, salt marsh and sand sea where the steppe has forest,
+    /// marsh and mountains.
+    pub fn name(self, land: Land) -> &'static str {
+        match (land, self) {
+            (Land::Desert, Ground::Clear) => "DESERT",
+            (Land::Desert, Ground::Forest) => "FARMLAND",
+            (Land::Desert, Ground::Marsh) => "SALT MARSH",
+            (Land::Desert, Ground::Mountain) => "SAND SEA",
+            (_, Ground::Clear) => "CLEAR",
+            (_, Ground::Forest) => "FOREST",
+            (_, Ground::Rough) => "ROUGH",
+            (_, Ground::Marsh) => "MARSH",
+            (_, Ground::Mountain) => "MOUNTAINS",
+            (_, Ground::Sea) => "SEA",
         }
     }
 }

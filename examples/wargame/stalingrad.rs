@@ -19,20 +19,20 @@ const NATIONS: &[Nation] = &[
     Nation { name: "SOVIET", side: 1, paper: 0xc9573f, ink: 0x1c0a06 },
 ];
 
-const PZ: Kit = Kit { nat: DE, kind: Kind::Arm, a: 9, d: 6, m: 8, what: "PANZER CORPS" };
-const GI: Kit = Kit { nat: DE, kind: Kind::Inf, a: 6, d: 6, m: 4, what: "INFANTRY CORPS" };
-const PD: Kit = Kit { nat: DE, kind: Kind::Arm, a: 6, d: 4, m: 8, what: "PANZER DIVISION" };
-const GM: Kit = Kit { nat: DE, kind: Kind::Mtn, a: 5, d: 6, m: 4, what: "MOUNTAIN CORPS" };
-const RI: Kit = Kit { nat: RO, kind: Kind::Inf, a: 3, d: 4, m: 4, what: "ARMY CORPS" };
-const RC: Kit = Kit { nat: RO, kind: Kind::Cav, a: 2, d: 3, m: 6, what: "CAVALRY CORPS" };
-const HI: Kit = Kit { nat: HU, kind: Kind::Inf, a: 3, d: 4, m: 4, what: "ARMY CORPS" };
-const II: Kit = Kit { nat: IT, kind: Kind::Inf, a: 3, d: 4, m: 4, what: "ARMY CORPS" };
-const IA: Kit = Kit { nat: IT, kind: Kind::Mtn, a: 3, d: 5, m: 4, what: "ALPINE CORPS" };
-const SR: Kit = Kit { nat: SU, kind: Kind::Inf, a: 4, d: 5, m: 4, what: "RIFLE ARMY" };
-const SG: Kit = Kit { nat: SU, kind: Kind::Inf, a: 5, d: 6, m: 4, what: "GUARDS ARMY" };
-const ST: Kit = Kit { nat: SU, kind: Kind::Arm, a: 7, d: 4, m: 7, what: "TANK ARMY" };
-const SC: Kit = Kit { nat: SU, kind: Kind::Cav, a: 3, d: 3, m: 6, what: "CAVALRY CORPS" };
-const SM: Kit = Kit { nat: SU, kind: Kind::Mot, a: 6, d: 4, m: 7, what: "MECHANISED CORPS" };
+const PZ: Kit = Kit { nat: DE, kind: Kind::Arm, a: 9, d: 6, m: 8, what: "PANZER CORPS", size: 3 };
+const GI: Kit = Kit { nat: DE, kind: Kind::Inf, a: 6, d: 6, m: 4, what: "INFANTRY CORPS", size: 3 };
+const PD: Kit = Kit { nat: DE, kind: Kind::Arm, a: 6, d: 4, m: 8, what: "PANZER DIVISION", size: 2 };
+const GM: Kit = Kit { nat: DE, kind: Kind::Mtn, a: 5, d: 6, m: 4, what: "MOUNTAIN CORPS", size: 3 };
+const RI: Kit = Kit { nat: RO, kind: Kind::Inf, a: 3, d: 4, m: 4, what: "ARMY CORPS", size: 3 };
+const RC: Kit = Kit { nat: RO, kind: Kind::Cav, a: 2, d: 3, m: 6, what: "CAVALRY CORPS", size: 3 };
+const HI: Kit = Kit { nat: HU, kind: Kind::Inf, a: 3, d: 4, m: 4, what: "ARMY CORPS", size: 3 };
+const II: Kit = Kit { nat: IT, kind: Kind::Inf, a: 3, d: 4, m: 4, what: "ARMY CORPS", size: 3 };
+const IA: Kit = Kit { nat: IT, kind: Kind::Mtn, a: 3, d: 5, m: 4, what: "ALPINE CORPS", size: 3 };
+const SR: Kit = Kit { nat: SU, kind: Kind::Inf, a: 4, d: 5, m: 4, what: "RIFLE ARMY", size: 4 };
+const SG: Kit = Kit { nat: SU, kind: Kind::Inf, a: 5, d: 6, m: 4, what: "GUARDS ARMY", size: 4 };
+const ST: Kit = Kit { nat: SU, kind: Kind::Arm, a: 7, d: 4, m: 7, what: "TANK ARMY", size: 4 };
+const SC: Kit = Kit { nat: SU, kind: Kind::Cav, a: 3, d: 3, m: 6, what: "CAVALRY CORPS", size: 3 };
+const SM: Kit = Kit { nat: SU, kind: Kind::Mot, a: 6, d: 4, m: 7, what: "MECHANISED CORPS", size: 3 };
 
 const fn f(name: &'static str, kit: Kit, col: i32, row: i32, turn: usize) -> Force { Force { name, kit, col, row, turn } }
 
@@ -115,7 +115,7 @@ const FORCES: &[Force] = &[
     f("3 GDS", SG, 13, 0, 13),
 ];
 
-const fn c(name: &'static str, col: i32, row: i32, size: u8, vp: i32, owner: usize) -> City { City { name, col, row, size, vp, owner } }
+const fn c(name: &'static str, col: i32, row: i32, size: u8, vp: i32, owner: usize) -> City { City { name, col, row, size, vp, owner, port: false } }
 
 const CITIES: &[City] = &[
     c("STALINGRAD", 21, 9, 2, 4, 1),
@@ -180,6 +180,7 @@ pub const SCENARIO: Scenario = Scenario {
     ],
     sides: ["AXIS", "SOVIET"],
     nations: NATIONS,
+    land: Land::Steppe,
     ground: &[
         "........fff............ff.....",
         "........f.f...................",
@@ -216,6 +217,7 @@ pub const SCENARIO: Scenario = Scenario {
     cold: 0,
     posture: ["aaaaaaaaaadddd", "ddddddddddaaaa"],
     supply,
+    range: 0,
     forces: FORCES,
     levels: &[(16, "AXIS DECISIVE VICTORY"), (12, "AXIS VICTORY"), (9, "DRAW"), (6, "SOVIET VICTORY"), (0, "SOVIET DECISIVE VICTORY")],
 };

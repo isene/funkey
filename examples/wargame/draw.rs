@@ -1,7 +1,7 @@
 //! Pictures: the board painted once, the counters, the marks on hexes.
 
 use crate::map::{Ground, Map, HH, S};
-use crate::scenario::{Kind, Scenario};
+use crate::scenario::{Kind, Land, Scenario};
 use funkey::*;
 
 pub const INK: Rgb = 0x2a2116;
@@ -17,16 +17,22 @@ fn hash(a: i32, b: i32, s: u32) -> u32 {
     h
 }
 
-fn base(g: Ground) -> Rgb {
-    match g {
-        Ground::Clear => 0xdcd19e,
-        Ground::Forest => 0xa9bc80,
-        Ground::Rough => 0xd2bd8c,
-        Ground::Marsh => 0xbcd2ab,
-        Ground::Mountain => 0xbfae90,
-        Ground::Sea => 0x76a5cc,
+fn base(land: Land, g: Ground) -> Rgb {
+    match (land, g) {
+        (Land::Desert, Ground::Clear) => 0xe8d3a2,
+        (Land::Desert, Ground::Forest) => 0xa9c47c,
+        (Land::Desert, Ground::Rough) => 0xd4b47e,
+        (Land::Desert, Ground::Marsh) => 0xdcd8cc,
+        (Land::Desert, Ground::Mountain) => 0xecc888,
+        (_, Ground::Clear) => 0xdcd19e,
+        (_, Ground::Forest) => 0xa9bc80,
+        (_, Ground::Rough) => 0xd2bd8c,
+        (_, Ground::Marsh) => 0xbcd2ab,
+        (_, Ground::Mountain) => 0xbfae90,
+        (_, Ground::Sea) => 0x76a5cc,
     }
 }
+
 
 /// True for a pixel inside a hex centred at (cx, cy), a little smaller
 /// by `inset` pixels.
@@ -79,7 +85,8 @@ pub fn board(sc: &Scenario, map: &Map) -> Frame {
     for i in 0..map.len() {
         let g = map.ground[i];
         let (cx, cy) = map.center(i);
-        let b = base(g);
+        let b = base(sc.land, g);
+        let desert = sc.land == Land::Desert;
         each_pixel(cx, cy, 0.0, |x, y| {
             let n = hash(x, y, 1) % 9;
             fr.put(x, y, tint(b, 0.96 + n as f32 * 0.01));
@@ -93,6 +100,9 @@ pub fn board(sc: &Scenario, map: &Map) -> Frame {
             }
         };
         match g {
+            Ground::Forest if desert => dots(4, &mut |fr, x, y| {
+                for k in 0..3 { fr.hline(x - 4, y - 2 + 2 * k, 8, 0x7f9e57); }
+            }),
             Ground::Forest => dots(7, &mut |fr, x, y| {
                 fr.circle(x, y, 3, 0x5e7d45);
                 fr.put(x - 1, y - 1, 0x86a661);
@@ -100,6 +110,18 @@ pub fn board(sc: &Scenario, map: &Map) -> Frame {
             Ground::Rough => dots(5, &mut |fr, x, y| {
                 fr.line(x - 3, y + 1, x, y - 2, 0x9c8158);
                 fr.line(x, y - 2, x + 3, y + 1, 0x9c8158);
+            }),
+            Ground::Marsh if desert => dots(7, &mut |fr, x, y| {
+                fr.hline(x - 2, y, 4, 0xf6f4ee);
+                fr.put(x + 1, y + 1, 0xb4ab98);
+            }),
+            Ground::Mountain if desert => dots(3, &mut |fr, x, y| {
+                // A dune: a crest with its shadow under it.
+                for k in -5..=5i32 {
+                    let h = (k * k) / 6;
+                    fr.put(x + k, y - 2 + h, 0xb88a4c);
+                    fr.put(x + k, y - 1 + h, 0xd9ad6a);
+                }
             }),
             Ground::Marsh => dots(6, &mut |fr, x, y| {
                 fr.hline(x - 3, y, 6, 0x5f9496);
@@ -115,6 +137,7 @@ pub fn board(sc: &Scenario, map: &Map) -> Frame {
                 fr.hline(x - 3, y, 3, 0x93bcdf);
                 fr.hline(x, y - 1, 3, 0x93bcdf);
             }),
+            Ground::Clear if desert => dots(5, &mut |fr, x, y| fr.put(x, y, 0xc4ad80)),
             Ground::Clear => {}
         }
     }
@@ -166,15 +189,15 @@ pub fn board(sc: &Scenario, map: &Map) -> Frame {
     fr
 }
 
-/// Copy the part of the board under the view into the frame.
-pub fn show_board(fr: &mut Frame, board: &Frame, vx: i32, vy: i32, w: i32, h: i32) {
-    for y in 0..h.min(fr.h) {
+/// Copy the part of the board under the view into the frame, `w` by `h`
+/// pixels from row `top` down.
+pub fn show_board(fr: &mut Frame, board: &Frame, vx: i32, vy: i32, top: i32, w: i32, h: i32) {
+    for y in 0..h.min(fr.h - top) {
         let by = y + vy;
-        if by < 0 || by >= board.h { continue; }
         for x in 0..w.min(fr.w) {
             let bx = x + vx;
-            let p = if bx >= 0 && bx < board.w { board.px[(by * board.w + bx) as usize] } else { OUTSIDE };
-            fr.px[(y * fr.w + x) as usize] = p;
+            let p = if bx >= 0 && bx < board.w && by >= 0 && by < board.h { board.px[(by * board.w + bx) as usize] } else { OUTSIDE };
+            fr.px[((y + top) * fr.w + x) as usize] = p;
         }
     }
 }
@@ -183,6 +206,8 @@ pub struct Look {
     pub paper: Rgb,
     pub ink: Rgb,
     pub kind: Kind,
+    /// How many marks go over the sign: 2 a division, 3 a corps.
+    pub size: u8,
     pub numbers: String,
     pub reduced: bool,
     pub spent: bool,
@@ -190,65 +215,114 @@ pub struct Look {
     pub picked: bool,
 }
 
-/// A counter, 22 pixels square, centred at (x, y): the unit's sign in
-/// a box, and its attack, defence and movement under it.
-pub fn counter(fr: &mut Frame, x: i32, y: i32, l: &Look) {
-    let (x0, y0) = (x - 11, y - 11);
-    let paper = if l.spent { tint(l.paper, 0.68) } else { l.paper };
-    let ink = if l.spent { tint(l.ink, 0.8) } else { l.ink };
-    fr.rect(x0 + 1, y0 + 1, 22, 22, 0x000000);
-    fr.rect(x0, y0, 22, 22, tint(paper, 0.7));
-    fr.rect(x0 + 1, y0 + 1, 20, 20, paper);
-    if l.reduced { fr.rect(x0 + 1, y0 + 1, 20, 3, mix(paper, WHITE, 0.6)); }
-    // The sign: a box with a cross for foot troops, an oval for tanks,
-    // both for motorised troops, a stroke for horse and a peak for the
-    // mountains.
-    let (bx, by, bw, bh) = (x0 + 4, y0 + 5, 14, 8);
-    fr.hline(bx, by, bw, ink);
-    fr.hline(bx, by + bh - 1, bw, ink);
-    fr.vline(bx, by, bh, ink);
-    fr.vline(bx + bw - 1, by, bh, ink);
+/// Darken a rectangle by `k`.
+fn shade(fr: &mut Frame, x: i32, y: i32, w: i32, h: i32, k: f32) {
+    for yy in y..y + h {
+        for xx in x..x + w {
+            let p = fr.get(xx, yy);
+            fr.put(xx, yy, tint(p, 1.0 - k));
+        }
+    }
+}
+
+/// A unit's sign, as on a military map, in a box `w` by `h` with its
+/// corner at (bx, by): a cross for foot troops, an oval for tanks, both
+/// for mechanised troops, a stroke for horse and a peak for mountain
+/// troops.
+pub fn sign(fr: &mut Frame, bx: i32, by: i32, w: i32, h: i32, kind: Kind, field: Rgb, ink: Rgb) {
+    fr.rect(bx, by, w, h, ink);
+    fr.rect(bx + 1, by + 1, w - 2, h - 2, field);
+    let (x1, y1) = (bx + w - 1, by + h - 1);
     let cross = |fr: &mut Frame| {
-        fr.line(bx, by, bx + bw - 1, by + bh - 1, ink);
-        fr.line(bx, by + bh - 1, bx + bw - 1, by, ink);
+        fr.line(bx, by, x1, y1, ink);
+        fr.line(bx, y1, x1, by, ink);
     };
     let oval = |fr: &mut Frame| {
-        fr.hline(bx + 4, by + 2, 6, ink);
-        fr.hline(bx + 4, by + 5, 6, ink);
-        fr.vline(bx + 3, by + 3, 2, ink);
-        fr.vline(bx + 10, by + 3, 2, ink);
+        let (ow, oh) = (w * 5 / 9, h / 2);
+        let (ox, oy) = (bx + (w - ow) / 2, by + (h - oh) / 2);
+        fr.hline(ox + 1, oy, ow - 2, ink);
+        fr.hline(ox + 1, oy + oh - 1, ow - 2, ink);
+        fr.vline(ox, oy + 1, oh - 2, ink);
+        fr.vline(ox + ow - 1, oy + 1, oh - 2, ink);
     };
-    match l.kind {
+    match kind {
         Kind::Inf => cross(fr),
         Kind::Arm => oval(fr),
         Kind::Mot => {
             cross(fr);
             oval(fr);
         }
-        Kind::Cav => fr.line(bx, by + bh - 1, bx + bw - 1, by, ink),
+        Kind::Cav => fr.line(bx, y1, x1, by, ink),
         Kind::Mtn => {
             cross(fr);
-            fr.rect(bx + 6, by + bh - 3, 2, 2, ink);
-            fr.hline(bx + 5, by + bh - 2, 4, ink);
+            let cx = bx + w / 2;
+            for k in 0..3 { fr.hline(cx - 1 - k, y1 - 3 + k, 2 + 2 * k, ink); }
         }
     }
+}
+
+/// A counter, 26 pixels square, centred at (x, y): the marks for its
+/// size, the unit's sign, and its attack, defence and movement.
+pub fn counter(fr: &mut Frame, x: i32, y: i32, l: &Look) {
+    const N: i32 = 26;
+    let (x0, y0) = (x - N / 2, y - N / 2);
+    let paper = if l.spent { tint(l.paper, 0.68) } else { l.paper };
+    let ink = if l.spent { tint(l.ink, 0.8) } else { l.ink };
+    shade(fr, x0 + 2, y0 + N, N, 2, 0.45);
+    shade(fr, x0 + N, y0 + 2, 2, N - 2, 0.45);
+    fr.rect(x0, y0, N, N, tint(paper, 0.5));
+    fr.rect(x0 + 1, y0 + 1, N - 2, N - 2, paper);
+    // Cardboard: light on the top and left, dark on the bottom and right.
+    let (light, dark) = (mix(paper, WHITE, 0.45), tint(paper, 0.78));
+    fr.hline(x0 + 1, y0 + 1, N - 2, light);
+    fr.vline(x0 + 1, y0 + 1, N - 2, light);
+    fr.hline(x0 + 1, y0 + N - 2, N - 2, dark);
+    fr.vline(x0 + N - 2, y0 + 2, N - 3, dark);
+    // A reduced unit shows its pale band, as on the back of a counter.
+    if l.reduced { fr.rect(x0 + 2, y0 + 2, N - 4, 5, mix(paper, WHITE, 0.6)); }
+    // The size: a small x for each mark.
+    let n = l.size as i32;
+    let mx = x - (4 * n - 1) / 2;
+    for k in 0..n {
+        let px = mx + 4 * k;
+        for (dx, dy) in [(0, 0), (2, 0), (1, 1), (0, 2), (2, 2)] { fr.put(px + dx, y0 + 3 + dy, ink); }
+    }
+    sign(fr, x0 + 4, y0 + 7, 18, 11, l.kind, mix(paper, WHITE, 0.35), ink);
     let tw = Frame::text_width(&l.numbers, false, 1) - 1;
-    fr.text(x - tw / 2, y0 + 15, &l.numbers, ink);
+    fr.text(x - tw / 2, y0 + 19, &l.numbers, ink);
+    let edge = |fr: &mut Frame, k: i32, c: Rgb| {
+        fr.hline(x0 + k, y0 + k, N - 2 * k, c);
+        fr.hline(x0 + k, y0 + N - 1 - k, N - 2 * k, c);
+        fr.vline(x0 + k, y0 + k, N - 2 * k, c);
+        fr.vline(x0 + N - 1 - k, y0 + k, N - 2 * k, c);
+    };
+    // Out of supply: a yellow edge.
     if l.hungry {
-        // Out of supply: a yellow edge.
-        for k in 0..2 {
-            fr.hline(x0 + k, y0 + k, 22 - 2 * k, 0xffd400);
-            fr.hline(x0 + k, y0 + 21 - k, 22 - 2 * k, 0xffd400);
-            fr.vline(x0 + k, y0 + k, 22 - 2 * k, 0xffd400);
-            fr.vline(x0 + 21 - k, y0 + k, 22 - 2 * k, 0xffd400);
-        }
+        for k in 0..2 { edge(fr, k, 0xffd400); }
     }
     if l.picked {
-        for k in -2..0 {
-            fr.hline(x0 + k, y0 + k, 22 - 2 * k, WHITE);
-            fr.hline(x0 + k, y0 + 21 - k, 22 - 2 * k, WHITE);
-            fr.vline(x0 + k, y0 + k, 22 - 2 * k, WHITE);
-            fr.vline(x0 + 21 - k, y0 + k, 22 - 2 * k, WHITE);
-        }
+        for k in -2..0 { edge(fr, k, WHITE); }
+    }
+}
+
+/// The key to the counters, as a strip `h` pixels high: each nation's
+/// colour, then each kind of unit the scenario has.
+pub fn legend(fr: &mut Frame, sc: &Scenario, w: i32, h: i32, bg: Rgb, text: Rgb) {
+    fr.rect(0, 0, w, h, bg);
+    fr.hline(0, h - 1, w, 0x3a4048);
+    let ty = (h - 7) / 2;
+    let mut x = 8;
+    for n in sc.nations {
+        fr.rect(x, ty - 1, 12, 9, tint(n.paper, 0.5));
+        fr.rect(x + 1, ty, 10, 7, n.paper);
+        x += 15;
+        x += fr.text_big(x, ty, n.name, text) + 9;
+    }
+    x += 6;
+    for (kind, name) in [(Kind::Inf, "INFANTRY"), (Kind::Arm, "TANKS"), (Kind::Mot, "MECHANISED"), (Kind::Cav, "CAVALRY"), (Kind::Mtn, "MOUNTAIN")] {
+        if !sc.forces.iter().any(|f| f.kit.kind == kind) { continue; }
+        sign(fr, x, ty - 1, 14, 9, kind, 0xd8d2c0, 0x1a1a1a);
+        x += 17;
+        x += fr.text_big(x, ty, name, text) + 9;
     }
 }

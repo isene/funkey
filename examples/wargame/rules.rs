@@ -13,9 +13,10 @@
 //!   cannot loses a step instead. A hex left empty may be taken by one of
 //!   the attackers.
 //! - Supply: a unit is in supply when a path runs from it to its side's
-//!   map edge without crossing an enemy or a hex next to one, unless a
-//!   friend stands there. Out of supply it moves and attacks at half,
-//!   and from its second turn so it loses a step every turn.
+//!   map edge, or a port its side holds, without crossing an enemy or a
+//!   hex next to one, unless a friend stands there. A scenario may limit
+//!   how long that path is. Out of supply a unit moves and attacks at
+//!   half, and from its second turn so it loses a step every turn.
 
 use crate::map::{Ground, Map};
 use crate::scenario::{Kind, Kit, Scenario};
@@ -359,7 +360,7 @@ impl War {
         if city > 0 && city >= ground {
             why.push((if city > 1 { "GREAT CITY" } else { "CITY" }, -city));
         } else if ground > 0 {
-            why.push((g.name(), -ground));
+            why.push((g.name(self.sc.land), -ground));
         }
         if !att.is_empty() && att.iter().all(|&a| self.map.river_between(self.units[a].hex.unwrap(), h)) {
             why.push(("RIVER", -1));
@@ -467,20 +468,23 @@ impl War {
         let zoc = self.zoc_map(side);
         let n = self.map.len();
         let pass = |h: usize| self.map.land(h) && self.occ[h].map_or(!zoc[h], |o| self.side_of(o) == side);
+        let port = |h: usize| self.map.city[h] >= 0 && self.sc.cities[self.map.city[h] as usize].port && self.owner[self.map.city[h] as usize] == side;
         let mut ok = vec![false; n];
         let mut q = VecDeque::new();
         for h in 0..n {
             let (c, r) = self.map.cr(h);
-            if (self.sc.supply)(side, c, r) && pass(h) {
+            if ((self.sc.supply)(side, c, r) || port(h)) && pass(h) {
                 ok[h] = true;
-                q.push_back(h);
+                q.push_back((h, 0));
             }
         }
-        while let Some(h) = q.pop_front() {
+        let far = if self.sc.range > 0 { self.sc.range } else { i32::MAX };
+        while let Some((h, d)) = q.pop_front() {
+            if d >= far { continue; }
             for (_, m) in self.map.around(h) {
                 if !ok[m] && pass(m) {
                     ok[m] = true;
-                    q.push_back(m);
+                    q.push_back((m, d + 1));
                 }
             }
         }

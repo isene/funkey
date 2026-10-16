@@ -1,6 +1,6 @@
 //! wargame: an old-school hex wargame, two sides taking turns on a map of
-//! a real campaign. Pick a scenario, a side, or two players, or watch the
-//! computer play itself.
+//! a real campaign: North Africa 1942 and Stalingrad 1942. Pick a
+//! scenario, a side, or two players, or watch the computer play itself.
 //!
 //!     cargo run --release --example wargame
 //!
@@ -13,9 +13,12 @@
 //!
 //! `WARGAME_BOT=<seed>` plays a whole war, computer against computer,
 //! with no terminal and prints how it went. `WARGAME_BOARD=<file.ppm>`
-//! paints the whole board with the units at the start.
+//! paints the whole board with the units at the start, or after
+//! `WARGAME_TURN=<n>` turns of such a war. `WARGAME_SCEN=<n>` picks the
+//! scenario for both, counted from 0 as on the title.
 
 mod ai;
+mod desert;
 mod draw;
 mod map;
 mod rules;
@@ -32,11 +35,13 @@ const W: i32 = 960;
 const H: i32 = 600;
 /// The map's part of the screen; the panel has the rest.
 const MAP_W: i32 = 700;
+/// The legend's strip over the map.
+const TOP: i32 = 18;
 const GAME: &str = "wargame";
 /// The game's own version; the engine has its own.
-const VERSION: &str = "0.1";
+const VERSION: &str = "0.2";
 
-const SCENARIOS: &[&Scenario] = &[&stalingrad::SCENARIO];
+const SCENARIOS: &[&Scenario] = &[&desert::SCENARIO, &stalingrad::SCENARIO];
 
 const PANEL: Rgb = 0x1d2127;
 const TEXT: Rgb = 0xe8e2d0;
@@ -122,9 +127,10 @@ impl Wargame {
         let text = store::load(GAME, "war")?;
         let (head, rest) = text.split_once('\n')?;
         let v: Vec<usize> = head.split(' ').skip(1).map(|x| x.parse().ok()).collect::<Option<_>>()?;
-        let sc = *SCENARIOS.get(*v.first()?)?;
-        let war = War::load(sc, rest)?;
-        (!war.over).then_some((v[0], [v.get(1) == Some(&1), v.get(2) == Some(&1)], war))
+        // The scenario by its name, so a new one in the list moves nothing.
+        let s = SCENARIOS.iter().position(|sc| rest.starts_with(&format!("WARGAME 1 {}\n", sc.name)))?;
+        let war = War::load(SCENARIOS[s], rest)?;
+        (!war.over).then_some((s, [v.get(1) == Some(&1), v.get(2) == Some(&1)], war))
     }
 
     fn save(&self) {
@@ -135,11 +141,16 @@ impl Wargame {
         }
     }
 
-    fn start(&mut self, scen: usize, human: [bool; 2], war: War) {
+    /// The painted board of a scenario, made when it changes.
+    fn board_for(&mut self, scen: usize) {
         if self.board_of != scen {
-            self.board = draw::board(SCENARIOS[scen], &war.map);
+            self.board = draw::board(SCENARIOS[scen], &map::Map::new(SCENARIOS[scen]));
             self.board_of = scen;
         }
+    }
+
+    fn start(&mut self, scen: usize, human: [bool; 2], war: War) {
+        self.board_for(scen);
         self.scen = scen;
         self.human = human;
         self.cursor = war.units.iter().find_map(|u| u.hex).unwrap_or(0);
@@ -165,17 +176,17 @@ impl Wargame {
         let (x, y) = self.war().map.center(hex);
         let (bw, bh) = (self.board.w, self.board.h);
         let (mut vx, mut vy) = self.view;
-        let m = 70;
-        if middle || (x as i32) < vx + m || x as i32 > vx + MAP_W - m || (y as i32) < vy + m || y as i32 > vy + H - m {
+        let (m, vh) = (70, H - TOP);
+        if middle || (x as i32) < vx + m || x as i32 > vx + MAP_W - m || (y as i32) < vy + m || y as i32 > vy + vh - m {
             if middle {
                 vx = x as i32 - MAP_W / 2;
-                vy = y as i32 - H / 2;
+                vy = y as i32 - vh / 2;
             } else {
                 vx = vx.clamp(x as i32 - MAP_W + m, x as i32 - m);
-                vy = vy.clamp(y as i32 - H + m, y as i32 - m);
+                vy = vy.clamp(y as i32 - vh + m, y as i32 - m);
             }
         }
-        self.view = (vx.clamp(0, (bw - MAP_W).max(0)), vy.clamp(0, (bh - H).max(0)));
+        self.view = (vx.clamp(0, (bw - MAP_W).max(0)), vy.clamp(0, (bh - vh).max(0)));
     }
 
     fn end_phase(&mut self) {
@@ -418,11 +429,11 @@ impl Wargame {
     fn draw_play(&mut self, fr: &mut Frame) {
         let w = self.war.as_ref().unwrap();
         let (vx, vy) = self.view;
-        draw::show_board(fr, &self.board, vx, vy, MAP_W, H);
+        draw::show_board(fr, &self.board, vx, vy, TOP, MAP_W, H - TOP);
         let on = |x: f32, y: f32| x > -30.0 && y > -30.0 && x < MAP_W as f32 + 30.0 && y < H as f32 + 30.0;
         let at = |h: usize| {
             let (x, y) = w.map.center(h);
-            (x - vx as f32, y - vy as f32)
+            (x - vx as f32, y - vy as f32 + TOP as f32)
         };
         // Who holds each city with points, as a small flag.
         for (i, c) in w.sc.cities.iter().enumerate() {
@@ -432,8 +443,8 @@ impl Wargame {
             if !on(x, y) { continue; }
             let owner = w.owner[i];
             let paper = w.sc.nations.iter().find(|n| n.side == owner).map(|n| n.paper).unwrap_or(WHITE);
-            fr.rect(x as i32 + 12, y as i32 - 4, 5, 8, 0x000000);
-            fr.rect(x as i32 + 13, y as i32 - 3, 3, 6, paper);
+            fr.rect(x as i32 + 13, y as i32 - 4, 5, 8, 0x000000);
+            fr.rect(x as i32 + 14, y as i32 - 3, 3, 6, paper);
         }
         if let Some(u) = self.picked {
             for h in w.targets(u, &self.reach) {
@@ -482,11 +493,12 @@ impl Wargame {
             let (x, y) = at(*h);
             let tw = Frame::text_width(text, true, 1);
             let bx = (x as i32 - tw / 2 - 4).clamp(2, MAP_W - tw - 10);
-            let by = if y < 40.0 { y as i32 + 18 } else { y as i32 - 30 };
+            let by = if y < TOP as f32 + 40.0 { y as i32 + 18 } else { y as i32 - 32 };
             fr.rect(bx, by, tw + 8, 13, 0x000000);
             fr.rect(bx + 1, by + 1, tw + 6, 11, 0xfff4d6);
             fr.text_big(bx + 4, by + 3, text, 0x8a1408);
         }
+        draw::legend(fr, w.sc, MAP_W, TOP, PANEL, SOFT);
         self.panel(fr);
     }
 
@@ -505,6 +517,7 @@ impl Wargame {
             paper: nat.paper,
             ink: nat.ink,
             kind: k.kind,
+            size: k.size,
             numbers: format!("{}-{}-{}", w.attack(u), w.defence(u), k.m),
             reduced: un.steps < 2,
             spent,
@@ -543,7 +556,7 @@ impl Wargame {
         // The hex under the cursor.
         let h = self.cursor;
         let (c, r) = w.map.cr(h);
-        let mut what = format!("{:02}{:02} {}", c, r, w.map.ground[h].name());
+        let mut what = format!("{:02}{:02} {}", c, r, w.map.ground[h].name(w.sc.land));
         if w.map.river[h] != 0 && w.map.river_of[h] > 0 {
             what += ", ";
             what += w.sc.rivers[w.map.river_of[h] as usize - 1].name;
@@ -605,7 +618,7 @@ impl Wargame {
         }
         let keys = if self.human[w.side] {
             match w.phase {
-                Phase::Combat => ["ENTER ON AN ENEMY: ATTACK", "N NEXT PHASE  ? RULES  Q QUIT"],
+                Phase::Combat => ["ENTER ON AN ENEMY MARKS IT", "N NEXT PHASE  ? RULES  Q QUIT"],
                 _ => ["ENTER PICKS AND MOVES  TAB NEXT", "U UNDO  N NEXT PHASE  ? RULES"],
             }
         } else {
@@ -622,8 +635,9 @@ impl Wargame {
         if input.pressed(Key::Up) || input.pressed(Key::Char('k')) { self.menu = (self.menu + n - 1) % n; }
         if input.pressed(Key::Down) || input.pressed(Key::Char('j')) { self.menu = (self.menu + 1) % n; }
         if SCENARIOS.len() > 1 {
-            if input.pressed(Key::Left) { self.scen = (self.scen + SCENARIOS.len() - 1) % SCENARIOS.len(); }
-            if input.pressed(Key::Right) { self.scen = (self.scen + 1) % SCENARIOS.len(); }
+            if input.pressed(Key::Left) || input.pressed(Key::Char('h')) { self.scen = (self.scen + SCENARIOS.len() - 1) % SCENARIOS.len(); }
+            if input.pressed(Key::Right) || input.pressed(Key::Char('l')) { self.scen = (self.scen + 1) % SCENARIOS.len(); }
+            self.board_for(self.scen);
         }
         if input.pressed(Key::Char('q')) || input.pressed(Key::Escape) { return Flow::Quit; }
         if input.pressed(Key::Char('?')) {
@@ -662,7 +676,7 @@ impl Wargame {
         fr.clear(0x14171c);
         // The board, small, as the picture behind the menu.
         let b = &self.board;
-        let (ox, oy, k) = (W - 430, 70, 2);
+        let (ox, oy, k) = (W - 430, 70, (b.w + 409) / 410);
         for y in 0..(b.h / k).min(H - oy - 20) {
             for x in 0..(b.w / k).min(410) {
                 fr.put(ox + x, oy + y, tint(b.get(x * k, y * k), 0.75));
@@ -745,7 +759,7 @@ const HELP: &[&[&str]] = &[
     ],
     &[
         "MOVING",
-        "Each hex costs movement points: clear 1, forest and rough 2, marsh and mountains 3. Crossing a river costs 1 more. Tanks pay 1 more off clear ground; mountain troops pay 2 in the mountains.",
+        "Each hex costs movement points: clear 1, forest and rough 2, marsh and mountains 3. In the desert, farmland costs 2, salt marsh and sand sea 3. Crossing a river costs 1 more. Tanks pay 1 more off clear ground; mountain troops pay 2 in the mountains.",
         "A unit must stop when it steps next to an enemy. A unit that starts next to one may step away, but not straight into another hex next to an enemy.",
         "A unit that has not moved may always go one hex. Mud halves movement, and the snow slows the side that suffers in it.",
         "Pick a unit with Enter: the hexes it can reach light up. Enter on one of them moves it. U takes a move back.",
@@ -756,10 +770,11 @@ const HELP: &[&[&str]] = &[
         "The odds go down a column for forest, rough or marsh, a city, or when every attacker is across a river; two for mountains or a great city. Mud costs a column, and so does snow for the side that suffers in it. Tanks in the open move the odds one column up.",
         "A die gives the result: A1 or A2, the attackers lose steps; DR, the defender falls back a hex; D1, it loses a step and falls back; EX, both lose a step; DE, it is destroyed.",
         "A unit that must fall back and has nowhere to go loses a step instead. When the hex is left empty, one attacker may take it.",
+        "Enter on an enemy marks it and lights your units that can join: gold are in, grey are out. Enter on one of yours puts it in or out. Enter on the enemy again rolls the die.",
     ],
     &[
         "SUPPLY",
-        "A unit is in supply when a path runs from it to its side's edge of the map, never through an enemy or a hex next to one, unless a friend stands there.",
+        "A unit is in supply when a path runs from it to its side's edge of the map, or to a port its side holds, never through an enemy or a hex next to one, unless a friend stands there. In the desert that path may be at most ten hexes long.",
         "Supply is checked at the start of a side's turn. Out of supply a unit moves and attacks at half strength, and from its second turn out of supply it loses a step every turn.",
         "So cutting the enemy off is the way to destroy whole armies: get behind them, and close the ring.",
     ],
@@ -804,8 +819,8 @@ impl Game for Wargame {
 
 /// A war played by the computer on both sides, up to the start of turn
 /// `stop` (counted from 1) or to the end, with a line for each turn.
-fn bot(seed: u64, stop: usize, quiet: bool) -> War {
-    let mut w = War::new(SCENARIOS[0], seed);
+fn bot(scen: usize, seed: u64, stop: usize, quiet: bool) -> War {
+    let mut w = War::new(SCENARIOS[scen], seed);
     while !w.over && w.turn + 1 < stop {
         match w.phase {
             Phase::Move | Phase::Exploit => {
@@ -832,9 +847,9 @@ fn bot(seed: u64, stop: usize, quiet: bool) -> War {
 
 /// The whole board with the units on it, as a picture.
 #[cfg(not(target_arch = "wasm32"))]
-fn paint(w: War, path: &str) {
+fn paint(scen: usize, w: War, path: &str) {
     let mut g = Wargame::new();
-    g.start(0, [true, true], w);
+    g.start(scen, [true, true], w);
     let w = g.war();
     let mut fr = Frame::new(g.board.w, g.board.h);
     fr.px.copy_from_slice(&g.board.px);
@@ -856,16 +871,17 @@ fn paint(w: War, path: &str) {
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
     let var = |k: &str| std::env::var(k).ok();
+    let scen = var("WARGAME_SCEN").and_then(|n| n.parse().ok()).unwrap_or(0usize).min(SCENARIOS.len() - 1);
     if let Some(s) = var("WARGAME_BOT") {
         let t = std::time::Instant::now();
         let stop = var("WARGAME_TURN").and_then(|n| n.parse().ok()).unwrap_or(99);
-        let w = bot(s.parse::<u64>().unwrap_or(1) * 2 + 1, stop, false);
+        let w = bot(scen, s.parse::<u64>().unwrap_or(1) * 2 + 1, stop, false);
         println!("{}: {} points to {}, {:.1} s", w.result(), w.vp(0), w.vp(1), t.elapsed().as_secs_f32());
-        if let Some(p) = var("WARGAME_BOARD") { paint(w, &p); }
+        if let Some(p) = var("WARGAME_BOARD") { paint(scen, w, &p); }
         return;
     }
     if let Some(p) = var("WARGAME_BOARD") {
-        paint(War::new(SCENARIOS[0], 1), &p);
+        paint(scen, War::new(SCENARIOS[scen], 1), &p);
         return;
     }
     let mut game = Wargame::new();
@@ -910,7 +926,7 @@ mod tests {
 
     #[test]
     fn odds_follow_the_numbers_and_the_tanks() {
-        let mut w = War::new(SCENARIOS[0], 7);
+        let mut w = War::new(SCENARIOS[1], 7);
         let h = open(&w);
         let r = ring(&w, h);
         only(&mut w, &[("48", h), ("LV", r[0])]);
@@ -929,7 +945,7 @@ mod tests {
 
     #[test]
     fn zones_of_control_stop_and_hold() {
-        let mut w = War::new(SCENARIOS[0], 7);
+        let mut w = War::new(SCENARIOS[1], 7);
         let h = open(&w);
         let r = ring(&w, h);
         only(&mut w, &[("48", h), ("LV", r[0])]);
@@ -948,7 +964,7 @@ mod tests {
 
     #[test]
     fn a_river_costs_one_more() {
-        let w = War::new(SCENARIOS[0], 7);
+        let w = War::new(SCENARIOS[1], 7);
         let (a, b) = (0..w.map.len())
             .flat_map(|a| w.map.around(a).map(move |(_, b)| (a, b)))
             .find(|&(a, b)| w.map.river_between(a, b) && w.map.ground[b] == Ground::Clear)
@@ -959,7 +975,7 @@ mod tests {
 
     #[test]
     fn a_ring_of_enemies_cuts_supply() {
-        let mut w = War::new(SCENARIOS[0], 7);
+        let mut w = War::new(SCENARIOS[1], 7);
         let h = open(&w);
         let r = ring(&w, h);
         only(&mut w, &[("48", h)]);
@@ -970,12 +986,79 @@ mod tests {
         assert!(!w.supplied(1)[h]);
     }
 
+    /// Let the computer move side `side` once, as at the start of a turn.
+    fn computer_moves(w: &mut War, side: usize) {
+        w.side = side;
+        w.phase = Phase::Move;
+        for u in 0..w.units.len() {
+            w.units[u].mp = w.full_mp(u);
+            w.units[u].moved = false;
+        }
+        for (u, path, cost) in ai::plan_moves(w) { w.go(u, &path, cost); }
+    }
+
+    #[test]
+    fn reserves_far_from_the_fighting_march_to_it() {
+        // Three Romanian corps side by side at the west edge, the Soviets
+        // far to the east: the clump must not stay put.
+        let mut w = War::new(SCENARIOS[1], 7);
+        let at = |c, r| w.map.at(c, r).unwrap();
+        let (front, clump) = (at(24, 14), [at(0, 12), at(0, 13), at(1, 12)]);
+        only(&mut w, &[("ROM I", clump[0]), ("ROM II", clump[1]), ("ROM IV", clump[2]), ("48", front)]);
+        computer_moves(&mut w, 0);
+        for name in ["ROM I", "ROM II", "ROM IV"] {
+            let h = w.units[unit(&w, name)].hex.unwrap();
+            assert!(!clump.contains(&h), "{name} stayed at {:?}", w.map.cr(h));
+        }
+    }
+
+    #[test]
+    fn a_unit_cut_off_heads_back_to_supply() {
+        let mut w = War::new(SCENARIOS[0], 7);
+        for (i, c) in w.sc.cities.iter().enumerate() {
+            if c.port { w.owner[i] = 0; }
+        }
+        let (lost, foe) = (w.map.at(20, 12).unwrap(), w.map.at(2, 2).unwrap());
+        only(&mut w, &[("50", lost), ("15 PZ", foe)]);
+        assert!(!w.supplied(1)[lost]);
+        computer_moves(&mut w, 1);
+        let (c, _) = w.map.cr(w.units[unit(&w, "50")].hex.unwrap());
+        assert!(c > 20, "it went to column {c}");
+    }
+
+    #[test]
+    fn the_odds_name_desert_ground_by_its_desert_name() {
+        let mut w = War::new(SCENARIOS[0], 7);
+        let h = (0..w.map.len()).find(|&h| w.map.ground[h] == Ground::Mountain && w.map.city[h] < 0).unwrap();
+        let n = ring(&w, h).into_iter().find(|&n| w.map.ground[n] != Ground::Sea).unwrap();
+        only(&mut w, &[("50", h), ("15 PZ", n)]);
+        let why: Vec<&str> = w.odds(&[unit(&w, "15 PZ")], unit(&w, "50")).why.iter().map(|r| r.0).collect();
+        assert!(why.contains(&"SAND SEA"), "{why:?}");
+    }
+
     #[test]
     fn a_saved_war_comes_back_the_same() {
-        let w = bot(5, 3, true);
-        let text = w.save();
-        let back = War::load(SCENARIOS[0], &text).unwrap();
-        assert_eq!(back.save(), text);
+        for scen in 0..SCENARIOS.len() {
+            let w = bot(scen, 5, 3, true);
+            let text = w.save();
+            let back = War::load(SCENARIOS[scen], &text).unwrap();
+            assert_eq!(back.save(), text);
+        }
+    }
+
+    #[test]
+    fn desert_supply_runs_ten_hexes_from_the_edge_or_a_port() {
+        let mut w = War::new(SCENARIOS[0], 7);
+        let at = |c, r| w.map.at(c, r).unwrap();
+        let (near, far, past_tobruk) = (at(10, 12), at(12, 12), at(17, 9));
+        only(&mut w, &[("15 PZ", near)]);
+        assert!(w.supplied(0)[near]);
+        assert!(!w.supplied(0)[far]);
+        assert!(!w.supplied(0)[past_tobruk]);
+        // Tobruk's harbour feeds whoever holds it.
+        let tobruk = w.sc.cities.iter().position(|c| c.name == "TOBRUK").unwrap();
+        w.owner[tobruk] = 0;
+        assert!(w.supplied(0)[past_tobruk]);
     }
 
     /// A whole war, computer against computer: `cargo test --release
@@ -983,13 +1066,15 @@ mod tests {
     #[test]
     #[ignore]
     fn the_bot_plays() {
-        for seed in 1..=5 {
-            let t = std::time::Instant::now();
-            let w = bot(seed * 2 + 1, 99, true);
-            println!("{}: {} to {}, steps lost {} {}, {:.1} s", w.result(), w.vp(0), w.vp(1), w.lost[0], w.lost[1], t.elapsed().as_secs_f32());
-            assert!(w.over && !w.result().is_empty());
-            assert!(w.lost[0] > 0 && w.lost[1] > 0);
-            assert!(t.elapsed().as_secs() < 10);
+        for scen in 0..SCENARIOS.len() {
+            for seed in 1..=5 {
+                let t = std::time::Instant::now();
+                let w = bot(scen, seed * 2 + 1, 99, true);
+                println!("{}: {} to {}, steps lost {} {}, {:.1} s", w.result(), w.vp(0), w.vp(1), w.lost[0], w.lost[1], t.elapsed().as_secs_f32());
+                assert!(w.over && !w.result().is_empty());
+                assert!(w.lost[0] > 0 && w.lost[1] > 0);
+                assert!(t.elapsed().as_secs() < 10);
+            }
         }
     }
 }
