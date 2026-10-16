@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>Play · Game Room</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="room.css?v=1">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap">
+      <a class="brand" href="./"><img src="icon.svg" alt="" width="34" height="34"><span>Game Room</span></a>
+      <a class="about-link" href="./">All games</a>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div id="room" hidden>
+      <div class="title-row">
+        <h1 id="name"></h1>
+        <span class="kinds" id="kinds"></span>
+      </div>
+      <div class="game" id="game">
+        <canvas id="screen"></canvas>
+        <div class="pad" id="pad" hidden></div>
+        <p class="bar">
+          <button type="button" id="full">Full screen</button>
+          <button type="button" id="keys">Keys on screen</button>
+          <a id="src" href="https://github.com/isene/funkey">Source</a>
+        </p>
+      </div>
+
+      <div class="below">
+        <div class="main-col">
+          <section class="panel">
+            <h2>How to play</h2>
+            <p id="about"></p>
+            <p class="help" id="help"></p>
+          </section>
+
+          <section class="panel" id="comments">
+            <h2>Comments</h2>
+            <form id="say" autocomplete="off">
+              <input id="who" maxlength="30" placeholder="Your name" aria-label="Your name">
+              <textarea id="text" maxlength="1000" rows="3" placeholder="Say something about the game" aria-label="Your comment"></textarea>
+              <div class="say-row">
+                <span class="note" id="note">Shows at once, for everyone. Be kind.</span>
+                <button type="submit" id="send">Send</button>
+              </div>
+            </form>
+            <ol class="talk" id="talk"></ol>
+            <p class="quiet" id="empty" hidden>No comments yet. Be the first.</p>
+          </section>
+        </div>
+
+        <aside class="side-col">
+          <section class="panel" id="top" hidden>
+            <h2>Top ten</h2>
+            <ol class="scores" id="scores"></ol>
+            <p class="quiet" id="noscores">No scores yet. Make the first.</p>
+          </section>
+          <section class="panel">
+            <h2>More games</h2>
+            <ul class="more" id="more"></ul>
+          </section>
+        </aside>
+      </div>
+    </div>
+    <p class="none" id="none" hidden>No game by that name. <a href="./">Pick one in the Game Room.</a></p>
+  </main>
+  <script src="games.js?v=1"></script>
+  <script src="funkey.js?v=5"></script>
+  <script src="play.js?v=1"></script>
+</body>
+</html>

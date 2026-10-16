@@ -83,6 +83,12 @@ pub fn in_buf(len: u32) -> *mut u8 {
     })
 }
 
+/// The page has written a value it kept into `in_buf` ("game/key", a new
+/// line, the value): put it back in the game's store.
+pub fn kept_done() {
+    IN.with(|b| crate::store::kept(&String::from_utf8_lossy(&b.borrow())));
+}
+
 /// The page has written its message into `in_buf`: hand it to the game.
 pub fn in_done() {
     let m = IN.with(|b| String::from_utf8_lossy(&b.borrow()).into_owned());
@@ -242,5 +248,7 @@ macro_rules! web {
         pub extern "C" fn fk_in(len: u32) -> *mut u8 { $crate::web::in_buf(len) }
         #[no_mangle]
         pub extern "C" fn fk_in_done() { $crate::web::in_done() }
+        #[no_mangle]
+        pub extern "C" fn fk_kept() { $crate::web::kept_done() }
     };
 }

@@ -64,6 +64,9 @@ pub use screen::Screen;
 pub use sprite::Sprite;
 pub use tilemap::{Body, Tilemap};
 
+/// The engine's version, for a game's title screen.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[cfg(feature = "term")]
 use std::time::{Duration, Instant};
 

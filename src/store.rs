@@ -36,9 +36,22 @@ pub fn load(game: &str, key: &str) -> Option<String> {
     KEPT.with(|k| k.borrow().get(&format!("{game}/{key}")).cloned())
 }
 
+/// In a web page the value also goes to the page as "keep game/key" and
+/// the value on the next line, so the page can keep it for the next
+/// visit and hand it back through `kept`.
 #[cfg(target_arch = "wasm32")]
 pub fn save(game: &str, key: &str, value: &str) {
     KEPT.with(|k| k.borrow_mut().insert(format!("{game}/{key}"), value.to_string()));
+    crate::web::outbox_push(format!("keep {game}/{key}\n{value}"));
+}
+
+/// A value the page kept from an earlier visit: "game/key", a new line,
+/// the value.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn kept(text: &str) {
+    if let Some((key, value)) = text.split_once('\n') {
+        KEPT.with(|k| k.borrow_mut().insert(key.to_string(), value.to_string()));
+    }
 }
 
 pub fn high_score(game: &str) -> u32 {

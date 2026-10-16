@@ -3,7 +3,7 @@
 //! weeks each, from 28 June to the end of December. A hex is about 40 km
 //! across; a German or allied unit is a corps, a Soviet one an army.
 
-use crate::scenario::*;
+use super::scenario::*;
 
 const DE: usize = 0;
 const RO: usize = 1;

@@ -1,7 +1,7 @@
 //! Pictures: the board painted once, the counters, the marks on hexes.
 
-use crate::map::{Ground, Map, HH, S};
-use crate::scenario::{Kind, Land, Scenario};
+use super::map::{Ground, Map, HH, S};
+use super::scenario::{Kind, Land, Scenario};
 use funkey::*;
 
 pub const INK: Rgb = 0x2a2116;

@@ -43,6 +43,7 @@
       </div>
       <div class="cta">
         <a href="#games" class="primary">The games</a>
+        <a href="https://isene.com/games/" class="secondary">Play in the browser</a>
         <a href="https://github.com/isene/funkey" class="secondary">GitHub</a>
       </div>
     </div>
@@ -100,7 +101,7 @@
     <div class="container">
       <h2>The games</h2>
       <p class="section-intro">
-        Eighteen games come with the engine. Each has its own version, shown on its
+        Nineteen games come with the engine. Each has its own version, shown on its
         title screen and tagged in the repo; the crate version is the engine's.
         Every one runs with <code>cargo run --release --example &lt;name&gt;</code>,
         and with <code>FUNKEY_PIXELS=kitty</code> in glass or kitty for real pixels.
@@ -110,6 +111,26 @@
       </p>
 
       <div class="grid">
+        <div class="card">
+          <img class="shot" src="img/wargame.png" alt="wargame: the desert of North Africa as hexes, German, Italian and British counters around Tobruk, the log of the fighting on the right">
+          <div class="card-head">
+            <div>
+              <h3 class="card-title"><a class="card-link" href="https://github.com/isene/funkey/tree/master/examples/wargame">wargame</a></h3>
+              <div class="card-kind">A hex wargame, like the board games of the 1980s</div>
+              <div class="card-version">wargame-v0.2</div>
+            </div>
+          </div>
+          <p class="card-desc">
+            Turn by turn on a map of hexes. North Africa 1942, Rommel's drive
+            from the Gazala line for Tobruk and the Nile, or Stalingrad 1942
+            and the Soviet answer in the snow. Move, attack at odds a die
+            decides, cut the enemy off from supply, and hold the cities when
+            the last turn ends. Play either side against the computer, or two
+            players at one keyboard.
+          </p>
+          <pre><span class="cmd">cargo run --release --example wargame</span></pre>
+        </div>
+
         <div class="card">
           <img class="shot" src="img/blocks.png" alt="blocks: two cats on the grass above a blue bay, one sitting and one walking, with a wooded hill and clouds behind them">
           <div class="card-head">

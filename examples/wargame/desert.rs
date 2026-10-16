@@ -4,7 +4,7 @@
 //! across, and a unit is a division or a brigade. In the desert supply
 //! runs no further than ten hexes from a side's edge or a port it holds.
 
-use crate::scenario::*;
+use super::scenario::*;
 
 const DE: usize = 0;
 const IT: usize = 1;

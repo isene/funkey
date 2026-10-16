@@ -18,8 +18,8 @@
 //!   how long that path is. Out of supply a unit moves and attacks at
 //!   half, and from its second turn so it loses a step every turn.
 
-use crate::map::{Ground, Map};
-use crate::scenario::{Kind, Kit, Scenario};
+use super::map::{Ground, Map};
+use super::scenario::{Kind, Kit, Scenario};
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, VecDeque};
 use std::rc::Rc;

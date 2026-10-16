@@ -13,8 +13,8 @@
 //!   hexes that cut enemies off from supply; neither drives on alone.
 //! - A unit with nothing to do near it marches toward the front.
 
-use crate::rules::*;
-use crate::scenario::Kind;
+use super::rules::*;
+use super::scenario::Kind;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
@@ -121,8 +121,8 @@ fn risk(w: &War, u: usize, h: usize, att: i32, trapped: bool) -> f32 {
     let c = w.map.city[h];
     let city = if c >= 0 { w.sc.cities[c as usize].size as i32 } else { 0 };
     let ground = match w.map.ground[h] {
-        crate::map::Ground::Forest | crate::map::Ground::Rough | crate::map::Ground::Marsh => 1,
-        crate::map::Ground::Mountain => 2,
+        super::map::Ground::Forest | super::map::Ground::Rough | super::map::Ground::Marsh => 1,
+        super::map::Ground::Mountain => 2,
         _ => 0,
     };
     let col = (raw as i32 - city.max(ground)).clamp(0, 7) as usize;

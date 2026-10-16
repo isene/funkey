@@ -85,3 +85,8 @@ mod castle;
 #[path = "../examples/blocks.rs"]
 #[allow(dead_code)]
 mod blocks;
+
+#[cfg(feature = "wargame")]
+#[path = "../examples/wargame/main.rs"]
+#[allow(dead_code)]
+mod wargame;

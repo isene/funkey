@@ -2,7 +2,7 @@
 #
 #   cargo build --release --target wasm32-unknown-unknown --features eliminator
 #
-# (or again, blocks, castle, chomp, climb, drive, gems, invaders, jumpman, kart, marble, raid, salvo, soar, stack, vector)
+# (or again, blocks, castle, chomp, climb, drive, gems, invaders, jumpman, kart, marble, raid, salvo, soar, stack, vector, wargame)
 #
 # gives target/wasm32-unknown-unknown/release/funkey_web.wasm, which
 # funkey.js plays in a canvas (see index.html).
@@ -35,6 +35,7 @@ salvo = []
 soar = []
 stack = []
 vector = []
+wargame = []
 
 [dependencies]
 funkey = { path = "..", package = "fe2o3-funkey", default-features = false }

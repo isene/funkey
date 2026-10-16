@@ -3,7 +3,7 @@
 //! SE, S, SW, NW. A river runs along hex sides, so a unit crosses it when
 //! it steps over one of those sides.
 
-use crate::scenario::{Land, Scenario};
+use super::scenario::{Land, Scenario};
 use std::collections::HashMap;
 
 /// A hex's corner radius, and its height, in pixels.

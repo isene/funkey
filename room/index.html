@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="description" content="Twelve games that play in your browser: shooters, puzzles, a kart race, a dungeon and a hex wargame. Free, no sign-up.">
+  <title>Game Room</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="room.css?v=1">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap">
+      <a class="brand" href="./"><img src="icon.svg" alt="" width="34" height="34"><span>Game Room</span></a>
+      <a class="about-link" href="https://github.com/isene/funkey">How they are made</a>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="intro">
+      <h1>Twelve games, ready to play</h1>
+      <p>Pick one and play it right here. No sign-up, no ads, nothing to install. Each game has comments below it, and most keep a top ten.</p>
+    </section>
+
+    <section class="hero" id="hero" hidden></section>
+
+    <section class="find" aria-label="Find a game">
+      <input type="search" id="search" placeholder="Find a game" autocomplete="off" spellcheck="false" aria-label="Find a game">
+      <div class="chips" id="chips" role="group" aria-label="Kinds of game"></div>
+    </section>
+
+    <section class="grid" id="grid" aria-live="polite"></section>
+    <p class="none" id="none" hidden>No game matches that. <button type="button" id="clear">Show them all</button></p>
+
+    <section class="latest" id="latest" hidden>
+      <h2>Latest comments</h2>
+      <ol id="talk"></ol>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <div class="wrap">
+      <p>The games are written in Rust on <a href="https://github.com/isene/funkey">funkey</a>, a game engine for the terminal.
+        The same games run in a terminal, and here as WebAssembly. Free to copy and change (Unlicense).</p>
+    </div>
+  </footer>
+  <script src="games.js?v=1"></script>
+  <script src="lobby.js?v=1"></script>
+</body>
+</html>

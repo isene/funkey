@@ -707,7 +707,7 @@ impl Wargame {
             y += 22;
         }
         fr.text_big(60, H - 40, "ENTER STARTS   ? RULES   Q QUITS", SOFT);
-        fr.text(60, H - 22, &format!("WARGAME {}  FUNKEY {}", VERSION, env!("CARGO_PKG_VERSION")), 0x606670);
+        fr.text(60, H - 22, &format!("WARGAME {}  FUNKEY {}", VERSION, funkey::VERSION), 0x606670);
     }
 
     fn draw_help(&self, fr: &mut Frame) {

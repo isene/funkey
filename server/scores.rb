@@ -5,6 +5,7 @@
 # a checkout of the funkey repo.
 #
 #   GET  funkey-scores.rb?game=salvo   the list
+#   GET  funkey-scores.rb?game=all     the best of each list: "salvo ABC 12345"
 #   POST funkey-scores.rb?game=salvo   body "ABC 12345": initials and
 #                                      score; the answer is the list
 #                                      with it
@@ -95,6 +96,10 @@ end
 
 begin
 game = ENV["QUERY_STRING"].to_s[/(?:\A|&)game=([a-z]+)/, 1]
+if game == "all" && %w[GET HEAD].include?(ENV["REQUEST_METHOD"])
+  best = GAMES.map { |g| [g, read_list(File.join(DIR, "#{g}.txt"), g).first] }.select { |_, e| e }
+  reply("200 OK", best.map { |g, e| "#{g} #{e[0]} #{e[1]}\n" }.join)
+end
 reply("400 Bad Request", "Which game?\n") unless GAMES.include?(game)
 path = File.join(DIR, "#{game}.txt")
 

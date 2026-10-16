@@ -123,14 +123,21 @@ cargo build --release --target wasm32-unknown-unknown --features eliminator
 ```
 
 Play it at [d6gaming.org](https://d6gaming.org/The_Eliminator_game.html).
-Seventeen of the games play at [isene.org/fe2o3/try](https://isene.org/fe2o3/try/funkeys/).
+Twelve of them play in the [Game Room](https://isene.com/games/), with a
+top ten and comments under each; `room/` is that site, and `room/build.sh`
+builds its games. Seventeen play at [isene.org/fe2o3/try](https://isene.org/fe2o3/try/funkeys/).
 A page has one core, so there raid and soar cast the ground for every
 other column, and castle draws a picture half as wide and high.
 
 A game talks to its page through `funkey::page`: `send` a message out,
 `recv` one back; in a terminal both do nothing. The top ten uses it: in a
 page the list is one that everyone playing there shares, kept by
-`server/scores.rb`, a small CGI script on isene.com.
+`server/scores.rb`, a small CGI script on isene.com. The comments are
+kept by `server/comments.rb` beside it; `server/test.sh` tests both.
+
+A game's saves go to the page as well (`store::save` sends "keep
+game/key" and the value). A page that keeps them in the browser hands
+them back to `funkey.play` the next time, so a war or a world lasts.
 
 ## Doom
 
@@ -180,7 +187,7 @@ writes the last frame. `DOOM_BENCH=1` times the renderer.
 The crate version is the engine's and moves only when the engine
 changes. Each game has its own version, shown on its title screen and
 tagged as `<game>-vX.Y`: `doom-v1.0`, `jumpman-v1.1`, `invaders-v1.0`,
-`drive-v1.0`, `soar-v1.1`, `climb-v1.0`, `castle-v1.1`, `gems-v1.3`, `salvo-v1.3`, `eliminator-v1.3`, `stack-v1.1`, `raid-v1.2`, `vector-v1.0`, `marble-v1.0`, `again-v1.0`, `kart-v1.2`, `chomp-v1.0`, `blocks-v0.3`. The picker is `funkeys-v1.13`.
+`drive-v1.0`, `soar-v1.1`, `climb-v1.0`, `castle-v1.1`, `gems-v1.3`, `salvo-v1.3`, `eliminator-v1.4`, `stack-v1.1`, `raid-v1.2`, `vector-v1.0`, `marble-v1.0`, `again-v1.1`, `kart-v1.2`, `chomp-v1.0`, `blocks-v0.3`, `wargame-v0.2`. The picker is `funkeys-v1.14`.
 
 ## Using it
 
