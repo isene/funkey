@@ -108,4 +108,9 @@ printf '%s\n' '{"t":1,"n":"Ann","c":"Hi"}' > "$tmp/home/funkey-scores/comments-r
 cget() { env -i PATH=/usr/bin:/bin REQUEST_METHOD=GET QUERY_STRING="$1" REMOTE_ADDR=3.3.3.1 ruby "$tmp/www/cgi-bin/funkey-comments.rb" 2>/dev/null | tr -d '\r'; }
 want "comments beside the checkout are found through the link" 200 '[{"t":1,"n":"Ann","c":"Hi"}]|' "$(cget game=raid)"
 
+# The web server runs a script itself, so it must be marked to run.
+for s in scores.rb comments.rb; do
+  [ -x "$here/$s" ] && echo "ok   $s may run" || { echo "FAIL $s is not marked to run"; fail=1; }
+done
+
 [ $fail = 0 ] && echo "ALL OK" || { echo "SOME FAILED"; exit 1; }
