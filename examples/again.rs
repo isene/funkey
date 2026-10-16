@@ -36,7 +36,7 @@ const W: i32 = 480;
 const H: i32 = 270;
 const GAME: &str = "again";
 /// The game's own version; the engine has its own.
-const VERSION: &str = "1.0";
+const VERSION: &str = "1.1";
 /// The most selves a room can give.
 const MOST: usize = 4;
 /// A tile's side in pixels, and the band of the screen a room is drawn in.
@@ -735,19 +735,25 @@ impl Again {
 
     /// Move what is drawn towards what is true: the selves, the doors and
     /// the mark on the timeline.
-    fn animate(&mut self, dt: f32) {
+    /// True while something still moves.
+    fn animate(&mut self, dt: f32) -> bool {
+        let mut moving = false;
         let who = self.shown().to_vec();
         let power = self.lv.power(&who);
         for at in 0..self.ajar.len() {
             if !matches!(self.lv.tiles[at], Tile::Door(_)) { continue; }
             let to = if self.lv.open(&who, power, at as u8, false) { 1.0 } else { 0.0 };
-            self.ajar[at] += (to - self.ajar[at]).clamp(-dt * 9.0, dt * 9.0);
+            let step = (to - self.ajar[at]).clamp(-dt * 9.0, dt * 9.0);
+            moving |= step != 0.0;
+            self.ajar[at] += step;
         }
         let back = self.rewound();
         for i in 0..self.seen.len() {
+            moving |= self.bump[i] > 0.0;
             self.bump[i] = (self.bump[i] - dt).max(0.0);
             let Some(r) = back else {
                 let to = self.spot(self.path[self.tick()][i]);
+                moving |= self.seen[i] != to;
                 let (dx, dy) = (to.0 - self.seen[i].0, to.1 - self.seen[i].1);
                 let far = (dx * dx + dy * dy).sqrt();
                 // A step takes SLIDE seconds; a long way back goes faster.
@@ -759,9 +765,14 @@ impl Again {
             let b = (a + 1).min(self.tick());
             let (p, q) = (self.spot(self.path[a][i]), self.spot(self.path[b][i]));
             self.seen[i] = (p.0 + (q.0 - p.0) * k, p.1 + (q.1 - p.1) * k);
+            moving = true;
         }
         let to = back.unwrap_or(self.tick() as f32);
-        self.head += (to - self.head) * (dt * 26.0).min(1.0);
+        if (to - self.head).abs() < 0.002 { self.head = to; } else {
+            self.head += (to - self.head) * (dt * 26.0).min(1.0);
+            moving = true;
+        }
+        moving
     }
 }
 
@@ -781,13 +792,14 @@ impl Game for Again {
                     self.room = (self.room + turn) % n;
                     self.audio.play(&self.snd.step, 0.5);
                 }
-                if input.pressed(Key::Enter) || input.pressed(Key::Space) { self.go(self.room); }
-                return Flow::Continue;
+                if input.pressed(Key::Enter) || input.pressed(Key::Space) { self.go(self.room); return Flow::Continue; }
+                return Flow::Wait;
             }
             Mode::End(s) => {
-                // Sparks while the last screen is up, four bursts a second.
+                // Sparks for the first seconds of the last screen, four
+                // bursts a second; then it stands still until a key.
                 let n = (s * 4.0) as u32;
-                if ((s + dt) * 4.0) as u32 != n {
+                if s < 6.0 && ((s + dt) * 4.0) as u32 != n {
                     let (x, y) = (40 + hash(n, 1) % (W as u32 - 80), 30 + hash(n, 2) % 110);
                     sparks(&mut self.particles, x as f32, y as f32, 30, 90.0, 1.2, [GOLD, BRIGHT, PALE][n as usize % 3]);
                 }
@@ -797,7 +809,7 @@ impl Game for Again {
                     self.particles.list.clear();
                     self.to_title();
                 }
-                return Flow::Continue;
+                return if s > 6.0 && self.particles.is_empty() { Flow::Wait } else { Flow::Continue };
             }
             _ => {}
         }
@@ -811,8 +823,15 @@ impl Game for Again {
         else if pressed('n') { self.go((self.room + 1) % ROOMS.len()); }
         else if pressed('p') { self.go((self.room + ROOMS.len() - 1) % ROOMS.len()); }
         else { self.play(input, dt); }
-        self.animate(dt);
-        Flow::Continue
+        // With nothing sliding, sparking or running, and no key kept down,
+        // the game sleeps until the next key.
+        let moving = self.animate(dt);
+        let held = [Key::Up, Key::Down, Key::Left, Key::Right, Key::Space].into_iter()
+            .chain("wasdhjkl.uz".chars().map(Key::Char)).any(|k| input.held(k));
+        let busy = moving || held || !self.particles.is_empty()
+            || matches!(self.mode, Mode::Run(_) | Mode::Rewind(_))
+            || matches!(self.mode, Mode::Solved(s) if s <= 0.3);
+        if busy { Flow::Continue } else { Flow::Wait }
     }
 
     fn draw(&mut self, f: &mut Frame) {

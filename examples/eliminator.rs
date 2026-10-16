@@ -38,7 +38,7 @@ const MH: i32 = 44;
 const LEVELS: usize = 5;
 const GAME: &str = "eliminator";
 /// The game's own version; the engine has its own.
-const VERSION: &str = "1.3";
+const VERSION: &str = "1.4";
 const TEXT: Rgb = 0xe8e0d0;
 const DIM: Rgb = 0x8a8478;
 const GOLD: Rgb = 0xffd040;
@@ -2621,7 +2621,13 @@ impl Game for Eliminator {
                 }
             }
         }
-        Flow::Continue
+        // Once the sparks, numbers and dice have settled, the game sleeps
+        // until the next key. The light and the title stand still then.
+        let busy = !self.particles.is_empty() || !self.floats.is_empty() || self.banner.is_some()
+            || self.foes.iter().any(|f| f.flash > 0.0)
+            || self.mode == Mode::Intro && self.intro.age < 4.0
+            || matches!(self.mode, Mode::Dead(t) | Mode::Won(t) if t <= 1.5);
+        if busy { Flow::Continue } else { Flow::Wait }
     }
 
     fn draw(&mut self, f: &mut Frame) {

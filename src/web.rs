@@ -26,6 +26,9 @@ struct Web {
     sound: Vec<f32>,
     /// True from a `Flow::Pause` until the next key goes down.
     paused: bool,
+    /// True from a `Flow::Wait` until the next key goes down, which is
+    /// the game's.
+    waiting: bool,
     /// The screen that asks for initials, while a top-ten score waits.
     ask: Option<Ask>,
 }
@@ -103,7 +106,7 @@ pub fn start(seed: u32, make: fn() -> Box<dyn Game>, cfg: Config) {
     let game = make();
     let rgba = vec![255; (cfg.width * cfg.height * 4) as usize];
     let frame = Frame::new(cfg.width, cfg.height);
-    let web = Web { make, game, cfg, frame, input: Input::new(), rgba, last: -1.0, left: 0.0, pcm: Vec::new(), sound: Vec::new(), paused: false, ask: None };
+    let web = Web { make, game, cfg, frame, input: Input::new(), rgba, last: -1.0, left: 0.0, pcm: Vec::new(), sound: Vec::new(), paused: false, waiting: false, ask: None };
     WEB.with(|w| *w.borrow_mut() = Some(web));
 }
 
@@ -129,6 +132,13 @@ pub fn frame(ms: f64) -> bool {
         let mut w = w.borrow_mut();
         let Some(w) = w.as_mut() else { return false };
         let step = 1.0 / w.cfg.fps.max(1) as f64;
+        if w.waiting {
+            // The picture stays as it is until a key goes down; then the
+            // game takes that key at once.
+            if !w.input.any_pressed() { return false; }
+            w.waiting = false;
+            (w.last, w.left) = (now, step);
+        }
         if w.paused {
             // Nothing moves and nothing is painted until a key goes down.
             // That key is not the game's.
@@ -169,10 +179,11 @@ pub fn frame(ms: f64) -> bool {
         w.left += (now - w.last).clamp(0.0, 0.25);
         w.last = now;
         let mut ticks = 0;
-        while w.left >= step && ticks < 4 && !w.paused {
+        while w.left >= step && ticks < 4 && !w.paused && !w.waiting {
             match w.game.update(&w.input, step as f32) {
                 Flow::Quit => w.game = (w.make)(),
                 Flow::Pause => w.paused = true,
+                Flow::Wait => w.waiting = true,
                 Flow::Continue => {}
             }
             w.input.clear_pressed();

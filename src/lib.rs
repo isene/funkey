@@ -91,6 +91,11 @@ pub enum Flow {
     /// pause is not passed on. The engine pauses the same way by itself
     /// when the window stops being the one in front.
     Pause,
+    /// Nothing moves until a key goes down: the picture stays as drawn and
+    /// the loop sleeps, so a game waiting on its player costs nothing.
+    /// Unlike a pause, the key that ends the wait is the game's. A game
+    /// that times a held key itself returns `Continue` while it is held.
+    Wait,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -136,7 +141,8 @@ pub fn pause_veil(frame: &mut Frame) {
 /// With `FUNKEY_SCRIPT` set, no terminal is touched: the keys in the
 /// script are fed for the given ticks (`"right*60,space*5,-*30"`) and
 /// the last frame goes to `FUNKEY_SHOT` as a PPM, or every frame when
-/// `FUNKEY_SHOT_EVERY` is set.
+/// `FUNKEY_SHOT_EVERY` is set. A game that returns `Flow::Wait` sleeps
+/// until a key goes down.
 #[cfg(feature = "term")]
 pub fn run(game: &mut dyn Game, cfg: Config) {
     if let Ok(script) = std::env::var("FUNKEY_SCRIPT") {
@@ -157,15 +163,21 @@ pub fn run(game: &mut dyn Game, cfg: Config) {
     let halve = cfg.fps > 30;
     let mut next = Instant::now();
     let mut ticks: u64 = 0;
+    // True when a wait just ended: the key that ended it is in `input`
+    // and must reach the game before the next poll forgets it.
+    let mut woke = false;
     loop {
-        input.poll();
+        if !woke { input.poll(); }
+        woke = false;
         if input.resized { screen.resize(); }
         let mut pause = input.blurred;
+        let mut wait = false;
         let mut updates = 0;
-        while !pause && Instant::now() >= next && updates < 4 {
+        while !pause && !wait && Instant::now() >= next && updates < 4 {
             match game.update(&input, dt) {
                 Flow::Quit => return,
                 Flow::Pause => pause = true,
+                Flow::Wait => wait = true,
                 Flow::Continue => {}
             }
             next += step;
@@ -179,6 +191,14 @@ pub fn run(game: &mut dyn Game, cfg: Config) {
         }
         if let Some((name, score)) = scores::due() {
             ask_initials(game, &mut screen, &mut input, &mut frame, &name, score);
+            next = Instant::now();
+            continue;
+        }
+        if wait {
+            game.draw(&mut frame);
+            screen.present(&frame);
+            wait_for_the_player(&mut screen, &mut input, &frame);
+            woke = true;
             next = Instant::now();
             continue;
         }
@@ -211,6 +231,21 @@ fn wait_for_a_key(game: &mut dyn Game, screen: &mut Screen, input: &mut Input, f
     // The key that ended the pause is not the game's, and a key let go
     // meanwhile may never have said so.
     input.release_all();
+}
+
+/// A wait: the picture stays up and the loop sleeps until a key goes
+/// down. Nothing is drawn or sent meanwhile, unless the window changes
+/// size.
+#[cfg(feature = "term")]
+fn wait_for_the_player(screen: &mut Screen, input: &mut Input, frame: &Frame) {
+    loop {
+        input.wait();
+        if input.resized {
+            screen.resize();
+            screen.present(frame);
+        }
+        if input.any_pressed() { return; }
+    }
 }
 
 /// A score for the top ten: the initials are asked for over the game's
@@ -273,8 +308,8 @@ fn script_key(name: &str) -> Option<Key> {
 
 /// The scripted run: each item of the script is a key and the ticks it
 /// is held for. The last frame goes to `shot`, and with `every` above 0
-/// every n-th frame goes to `<shot>-<number>.ppm` on the way. A pause is
-/// no stop here: nobody is there to press a key.
+/// every n-th frame goes to `<shot>-<number>.ppm` on the way. A pause or
+/// a wait is no stop here: the script's ticks go on.
 #[cfg(feature = "term")]
 fn run_script(game: &mut dyn Game, cfg: Config, script: &str, shot: Option<String>, every: u32) {
     let mut input = Input::new();
@@ -317,7 +352,7 @@ mod tests {
                 if input.pressed(k) { t.push(name); } else if input.held(k) { t.push(name.to_ascii_lowercase()); }
             }
             self.ticks.push(t);
-            if input.pressed(Key::Char('p')) { Flow::Pause } else { Flow::Continue }
+            if input.pressed(Key::Char('p')) { Flow::Pause } else if input.pressed(Key::Char('w')) { Flow::Wait } else { Flow::Continue }
         }
         fn draw(&mut self, f: &mut Frame) {
             self.draws += 1;
@@ -338,10 +373,11 @@ mod tests {
     #[test]
     fn a_script_holds_each_key_for_its_ticks() {
         let mut g = Probe::default();
-        run_script(&mut g, CFG, "right*3,-*2,space,p,right*2,q,space*9", None, 0);
+        run_script(&mut g, CFG, "right*3,-*2,space,p,right*2,w,-,q,space*9", None, 0);
         // A capital is the tick the key went down, a small letter a tick
-        // it stayed down. The pause is passed by, and Q ends the run.
-        assert_eq!(g.ticks, ["R", "r", "r", "", "", "S", "P", "R", "r"]);
+        // it stayed down. The pause and the wait are passed by, and Q ends
+        // the run.
+        assert_eq!(g.ticks, ["R", "r", "r", "", "", "S", "P", "R", "r", "", ""]);
         assert_eq!(g.draws, 1, "with no shots asked for, only the last frame is drawn");
     }
 

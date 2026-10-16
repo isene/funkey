@@ -32,6 +32,7 @@ Arrows or WASD move, Space jumps, Up and Down climb a ladder, R restarts, Q quit
 - **scores**: a top ten with initials, as on an arcade cabinet. A game says `scores::record(GAME, score)` when it is over. A score that makes the list has the engine ask for three initials and then show the list. The list is a file under `~/.funkey/`.
 - **run**: a fixed-step loop at the frame rate you ask for. The frame is scaled to the terminal and centred. With `FUNKEY_SCRIPT` set, the same loop runs with no terminal and writes frames, for tests and films. `bench` times a game the same way.
 - **Pause**: a game returns `Flow::Pause` and the engine does the rest. The picture goes dark under the word PAUSED and the sound stops. The game then uses no processor time until a key is pressed. Switch to another window and the engine pauses by itself, where the terminal reports it (glass, kitty and most others).
+- **Wait**: a turn-based game returns `Flow::Wait` while nothing moves. The picture stays and the game uses no processor time until a key is pressed; that key goes to the game. eliminator and again do this.
 
 A game is a type with two methods:
 
