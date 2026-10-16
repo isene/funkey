@@ -125,7 +125,7 @@ cargo build --release --target wasm32-unknown-unknown --features eliminator
 Play it at [d6gaming.org](https://d6gaming.org/The_Eliminator_game.html).
 Twelve of them play in the [Game Room](https://isene.com/games/), with a
 top ten and comments under each; `room/` is that site, and `room/build.sh`
-builds its games. Seventeen play at [isene.org/fe2o3/try](https://isene.org/fe2o3/try/funkeys/).
+builds its games. Six more play at [isene.org/fe2o3/try](https://isene.org/fe2o3/try/funkeys/).
 A page has one core, so there raid and soar cast the ground for every
 other column, and castle draws a picture half as wide and high.
 
