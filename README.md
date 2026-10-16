@@ -63,7 +63,7 @@ fn main() {
 
 ## The games
 
-Fifteen games come with the engine, and Doom below:
+Eighteen games come with the engine, and Doom below:
 
 - `climb`: a small Jumpman-style platformer, 200 lines. Ladders, coins, blobs.
 - `jumpman`: a Jumpman Junior kind of game. Five levels of girders, ladders and ropes. Bombs to collect, bullets to jump, robots to dodge. A fall from too high is the end of you. Some bombs reveal ladders or take girders away. A title tune, a high score.
@@ -81,6 +81,7 @@ Fifteen games come with the engine, and Doom below:
 - `kart`: in the spirit of Super Mario Kart. Eight karts on four tracks: a meadow, a beach, an icy pass and a desert. The road is flat and painted the way that game painted it, with the karts on it in 3D. Hop into a bend and hold the drift until the sparks turn blue or orange, then let go for a push. Boxes hand out six items, kinder ones to those at the back. A cup is four races of three laps, at 50, 100 or 150cc.
 - `chomp`: in the spirit of Pac-Man, with a maze, art and sound of its own. A muncher eats the dots while four chasers hunt it by the arcade's rules. They scatter to their corners and chase by turns. One comes straight for you, one aims ahead, one closes in from the other side, and one loses heart up close. A power dot turns the hunt around for a few seconds. Each level is faster, and the scared seconds get fewer.
 - `blocks`: in the spirit of Minecraft. A world of blocks grown from a seed: hills, a sea, tunnels through the stone and groves of trees. One great mountain has snow on top, and clouds drift over it all. Walk it, swim in it, dig into it and build on it with ten kinds of block. What you dig goes in your pockets. From them you make planks, glass, brick and a pickaxe for the stone. Water runs into a hole dug beside it. Cats come to see who is there, and sit by you. The corners where blocks meet are darker, and so is the ground under a roof. The world is kept when you leave. There is nothing to win.
+- `wargame`: turn by turn on a map of hexes, like the board wargames of the 1980s. The first scenario is Stalingrad 1942: fourteen turns of two weeks, from the German drive for the Volga and the Caucasus to the Soviet answer in the snow. Move, attack at odds a die decides, cut the enemy off from supply, and hold the cities with points when the last turn ends. Play either side against the computer, two players at one keyboard, or watch the computer play itself. The war is kept when you leave.
 - `drive`: a car on a winding road over the hills, on the 3D rasterizer. Fetch the packages before the clock runs out, then more of them with less time. An arrow points at the nearest. Go fast, leave the road, regret it.
 
 ```bash
@@ -100,6 +101,7 @@ cargo run --release --example again
 cargo run --release --example kart
 cargo run --release --example chomp
 cargo run --release --example blocks
+cargo run --release --example wargame
 ```
 
 `funkeys` is the picker: the games as cards with screenshots, Enter plays

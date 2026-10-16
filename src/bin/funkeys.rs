@@ -12,7 +12,7 @@ use crust::{Crust, Cursor, Input, Pane, Popup};
 use std::io::Write;
 use std::path::PathBuf;
 
-const VERSION: &str = "1.13";
+const VERSION: &str = "1.14";
 const PAGE: &str = "https://isene.org/funkey/";
 
 struct Game {
@@ -26,6 +26,13 @@ struct Game {
 }
 
 const GAMES: &[Game] = &[
+    Game {
+        name: "wargame",
+        kind: "Hex wargame",
+        blurb: "Stalingrad 1942, turn by turn",
+        keys: "The arrows move the cursor. Enter picks a unit, then the hex it\ngoes to; Tab finds the next one, U takes a move back, N ends the\nphase. To attack: Enter on an enemy, Enter on your units to leave\nsome out, Enter on the enemy again to roll. ? shows the rules,\nQ saves and leaves.\n\nFourteen turns from the summer drive to the Volga to the Soviet\nanswer in the snow. Hold the cities with points at the end.",
+        shot: include_bytes!("../../docs/img/wargame.png"),
+    },
     Game {
         name: "blocks",
         kind: "Block world",
