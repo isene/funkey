@@ -86,6 +86,14 @@ server.listen(0, "127.0.0.1", async () => {
     // A big saved value grows the game's memory as it is handed over.
     // funkey.js once looked at the memory first, and the page broke.
     await page.evaluate(() => localStorage.setItem("keep:wargame/test", "x".repeat(200000)));
+    // Let the test see the game's sound and count its frames.
+    await page.addInitScript(() => {
+      const Real = window.AudioContext;
+      window.AudioContext = class extends Real { constructor(o) { super(o); window.sound = this; } };
+      window.ticks = 0;
+      const raf = window.requestAnimationFrame.bind(window);
+      window.requestAnimationFrame = f => raf(t => { window.ticks++; f(t); });
+    });
     await page.goto(base + "play.html?g=wargame");
     await page.waitForTimeout(1500);
     check("a big saved value does not break the page", errors.length === 0, errors);
@@ -104,6 +112,24 @@ server.listen(0, "127.0.0.1", async () => {
     await page.waitForTimeout(300);
     const after = await gold();
     check("the banner goes with the click", before > 0 && after === 0, [before, after]);
+
+    // The game and its sound sleep while the reader is in another window:
+    // a running AudioContext keeps the sound card awake, even in silence.
+    const state = async () => {
+      const t = await page.evaluate(() => ticks);
+      await page.waitForTimeout(300);
+      return page.evaluate(t => [window.sound ? sound.state : "none", ticks - t], t);
+    };
+    const playing = await state();
+    await page.evaluate(() => window.dispatchEvent(new Event("blur")));
+    await page.waitForTimeout(100);
+    const left = await state();
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await page.waitForTimeout(100);
+    const back = await state();
+    check("the game and its sound sleep while the window is left",
+      playing[0] === "running" && playing[1] > 5 && left[0] === "suspended" && left[1] === 0
+        && back[0] === "running" && back[1] > 5, [playing, left, back]);
 
     // Start a war and leave it: Q saves it, and the page keeps it.
     for (const k of ["Enter", "q"]) { await page.keyboard.press(k); await page.waitForTimeout(400); }
