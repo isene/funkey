@@ -17,8 +17,21 @@
   window.ROOM = {
     KINDS: ["Arcade", "Shooting", "Thinking", "Adventure", "Racing"],
     GAMES: {
+      dust: {
+        kinds: ["Adventure", "Arcade"], v: "1.0", size: [320, 180], isnew: true,
+        line: "Dig down through caves where every grain falls, flows and burns.",
+        about: "A descent through five kinds of cave, each drawn anew for every run. Every pixel is a grain that obeys its own rules: " +
+          "sand heaps, water finds its level, oil floats and burns, acid eats rock, lava sets the wood alight and turns to stone in water. " +
+          "Four wands bore, burn, pour and blast. Take the gold, mind the slimes, bats and imps, and find the gate to the next depth.",
+        alt: "dust: a small digger with a lamp in a red cave, lava running down a slope and glowing in the dark",
+        help: "<kbd>←</kbd> <kbd>→</kbd> walk, <kbd>↑</kbd> lifts you while the lamp oil lasts, <kbd>↓</kbd> aims down. " +
+          "<kbd>Z</kbd> or <kbd>Space</kbd> fires the wand, <kbd>X</kbd> picks the next one (or <kbd>1</kbd> to <kbd>4</kbd>): bore, flame, spout, bomb. " +
+          "Gold is ten a grain, and each gate pays more the deeper it lies. <kbd>P</kbd> pauses.",
+        move: ARROWS,
+        keys: [K("z", "Z", "fire"), K("x", "X", "wand"), K("p", "P", "pause"), K("Enter", "Enter", "start"), QUIT],
+      },
       wargame: {
-        kinds: ["Thinking"], v: "0.3", size: [960, 600], isnew: true,
+        kinds: ["Thinking"], v: "0.3", size: [960, 600],
         line: "A hex wargame: North Africa or Stalingrad, 1942.",
         about: "A board wargame in the spirit of the 1980s classics, one side against the other on a hex map. " +
           "Rommel's drive for the Nile, or the drive for the Volga and the Soviet answer in the snow. " +

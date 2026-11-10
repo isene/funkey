@@ -90,3 +90,8 @@ mod blocks;
 #[path = "../examples/wargame/main.rs"]
 #[allow(dead_code)]
 mod wargame;
+
+#[cfg(feature = "dust")]
+#[path = "../examples/dust.rs"]
+#[allow(dead_code)]
+mod dust;

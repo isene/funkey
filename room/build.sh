@@ -7,7 +7,7 @@ set -e
 here=$(cd "$(dirname "$0")" && pwd)
 top=$(cd "$here/../.." && pwd)
 cd "$here/../web"
-for g in ${@:-raid kart salvo wargame stack again marble chomp eliminator vector blocks jumpman}; do
+for g in ${@:-dust raid kart salvo wargame stack again marble chomp eliminator vector blocks jumpman}; do
   PATH="/usr/bin:$PATH" RUSTFLAGS="--remap-path-prefix=$HOME/= --remap-path-prefix=$top/=" \
     cargo build --release --quiet --target wasm32-unknown-unknown --features "$g"
   /usr/bin/cp target/wasm32-unknown-unknown/release/funkey_web.wasm "$here/wasm/$g.wasm"

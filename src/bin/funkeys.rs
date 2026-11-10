@@ -12,7 +12,7 @@ use crust::{Crust, Cursor, Input, Pane, Popup};
 use std::io::Write;
 use std::path::PathBuf;
 
-const VERSION: &str = "1.15";
+const VERSION: &str = "1.16";
 const PAGE: &str = "https://isene.org/funkey/";
 
 struct Game {
@@ -26,6 +26,13 @@ struct Game {
 }
 
 const GAMES: &[Game] = &[
+    Game {
+        name: "dust",
+        kind: "Falling-sand cave descent",
+        blurb: "Every grain falls, flows and burns",
+        keys: "Left and Right walk, Up lifts you while the lamp oil lasts, Down\naims down. Z or Space fires the wand, X picks the next one (or 1\nto 4): bore, flame, spout, bomb. P pauses, Q quits.\n\nEvery pixel is a grain: sand heaps, water levels, oil burns, acid\neats rock, lava turns to stone in water. Take the gold and find\nthe gate to the next depth.",
+        shot: include_bytes!("../../docs/img/dust.png"),
+    },
     Game {
         name: "wargame",
         kind: "Hex wargame",

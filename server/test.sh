@@ -90,7 +90,7 @@ want "a game not in the room"                 400 "Which game?|"     "$(creq GET
 want "a path as the game"                     400 "Which game?|"     "$(creq GET 'game=../../etc/passwd' 3.3.3.1 '')"
 want "a game name with more behind it"        400 "Which game?|"     "$(creq GET 'game=salvo.txt' 3.3.3.1 '')"
 want "no comment on all"                      400 "Which game?|"     "$(creq POST game=all 3.3.4.2 $'Bob\nHi')"
-want "a comment count for each game"        200 '{"raid":0,"kart":0,"salvo":1,"wargame":2,"stack":1,"again":0,"marble":0,"chomp":0,"eliminator":0,"vector":0,"blocks":0,"jumpman":0}|' \
+want "a comment count for each game"        200 '{"dust":0,"raid":0,"kart":0,"salvo":1,"wargame":2,"stack":1,"again":0,"marble":0,"chomp":0,"eliminator":0,"vector":0,"blocks":0,"jumpman":0}|' \
   "$(creq GET game=all 3.3.3.1 '' | sed 's/^{"counts":\({[^}]*}\).*/\1/')"
 want "another method"                         405 "GET or POST.|"    "$(creq PUT game=wargame 3.3.3.1 '')"
 printf 'junk\n{"t":"x","n":1}\n<script>\n' >> "$tmp/c/comments-wargame.txt"
