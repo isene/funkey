@@ -2166,7 +2166,7 @@ impl Game for Bigger {
                     View::Stage(s) => s.lines(),
                     View::Galaxy => ("THE HOLE WAS THE HEART OF A GALAXY.", ""),
                     View::Web => ("THE GALAXY WAS ONE OF MANY.", ""),
-                    View::Void => ("ALL OF THEM WERE", ""),
+                    View::Void => ("ALL OF THEM WERE A DOT.", ""),
                 };
                 self.say(f, a, b, (k - 0.3) * 4.0);
             }
