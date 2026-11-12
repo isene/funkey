@@ -341,24 +341,63 @@ fn lens(f: &mut Frame, cx: f32, cy: f32, r: f32) {
     }
 }
 
-/// A black hole: the bent sky, the dark middle and the glowing ring of
-/// what is falling in.
+/// A black hole: the bent sky, the dark middle, and the disc of hot gas
+/// that goes round it. The disc is seen nearly edge on. Its far half
+/// shows twice: flat behind the hole, and bent over the top and under
+/// the bottom of it, since the light from there curves round.
 fn hole(f: &mut Frame, x: f32, y: f32, r: f32, c: Rgb, turn: f32, a: f32) {
     lens(f, x, y, r);
-    circle_of_light(f, x, y, r + 1.0, c, 0.5 * a);
-    let n = (r * 14.0) as i32;
-    for i in 0..n {
-        let th = i as f32 / n as f32 * TAU;
-        // The side that turns toward the eye is brighter.
-        let bright = (0.55 + 0.45 * (th + 0.4).cos()) * a;
-        for (far, k) in [(1.7, 0.5), (2.0, 0.8), (2.3, 0.45), (2.7, 0.2)] {
-            let swirl = th + turn * (2.4 - far);
-            let (px, py) = (x + swirl.cos() * r * far, y + swirl.sin() * r * far * 0.3);
-            // The far half of the ring is hidden behind the hole.
-            if swirl.sin() < 0.0 && (px - x).abs() < r { continue; }
-            add(f, px as i32, py as i32, c, bright * k * (0.6 + 0.4 * hash(i, far as i32, 5)));
+    const TILT: f32 = 0.27;
+    let (inner, outer) = (r * 1.45, r * 3.2);
+    let hot = mix(c, WHITE, 0.85);
+    // Gas at an angle and a distance: streaks that go round, the inner
+    // ones faster than the outer ones.
+    let gas = |th: f32, rho: f32, p: f32| {
+        let (u, v) = ((th / TAU + 0.5) * 16.0, rho / r * 4.5);
+        let fast = noise(u + turn * 2.6, v, 16, 91);
+        let slow = noise(u + turn * 1.3, v + 5.0, 16, 92);
+        let fine = noise(u * 2.0 + turn * 4.0, v * 3.0, 32, 93);
+        (fast * (1.0 - p) + slow * p) * 0.75 + fine * 0.25
+    };
+    let reach = outer.ceil() as i32;
+    for dy in -reach..=reach {
+        for dx in -reach..=reach {
+            let (fx, fy) = (dx as f32, dy as f32);
+            let d = (fx * fx + fy * fy).sqrt();
+            let (px, py) = (x as i32 + dx, y as i32 + dy);
+            // The far half of the disc, bent round the hole: a bright
+            // rim that hugs the dark middle, thickest over the top.
+            if d >= r && d < r * 1.5 {
+                let th = fy.atan2(fx);
+                let over = 0.55 + 0.45 * (-fy / d);
+                let thick = r * (0.22 + 0.24 * over);
+                let k = (1.0 - (d - r) / thick).max(0.0);
+                let streak = 0.55 + 0.6 * gas(th, r * 1.6 + (d - r) * 3.0, 0.2);
+                // The gas that comes toward the eye, on the left, shines more.
+                let side = 0.7 + 0.5 * (-fx / d);
+                add(f, px, py, mix(hot, c, (d - r) / thick), k * streak * side * over * 2.0 * a);
+                // And right at the edge, a thin ring of light that has
+                // gone all the way round.
+                let ring = (1.0 - (d - r * 1.03).abs() / 1.2).max(0.0);
+                add(f, px, py, WHITE, ring * 0.9 * (r / 16.0).min(1.0) * a);
+            }
+            // The disc itself, squeezed flat by the angle it is seen at.
+            let (ex, ey) = (fx, fy / TILT);
+            let rho = (ex * ex + ey * ey).sqrt();
+            if rho < inner || rho > outer { continue; }
+            // Its far half is hidden where the hole stands in front.
+            if fy < 0.0 && d < r * 1.02 { continue; }
+            let p = (rho - inner) / (outer - inner);
+            let th = ey.atan2(ex);
+            let heat = (1.0 - p).powf(1.15) * (p * 14.0).min(1.0);
+            let streak = 0.25 + 1.1 * gas(th, rho, p);
+            let side = 0.55 + 0.75 * (0.5 - 0.5 * th.cos());
+            let col = if p < 0.35 { mix(hot, c, p / 0.35) } else { mix(c, tint(c, 0.45), (p - 0.35) / 0.65) };
+            add(f, px, py, col, heat * streak * side * 2.3 * a);
         }
     }
+    // A soft light round it all.
+    glow(f, x, y, r * 4.2, c, 0.13 * a);
 }
 
 /// The old picture at a spot, also past its edges: there it is laid out
