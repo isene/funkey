@@ -61,7 +61,7 @@ server.listen(0, "127.0.0.1", async () => {
   try {
     await page.goto(base);
     await page.waitForSelector(".card");
-    check("the lobby shows thirteen games", (await page.$$(".card")).length === 13);
+    check("the lobby shows fourteen games", (await page.$$(".card")).length === 14);
     check("the lobby greets", (await page.textContent("h1")) === "Welcome to the funkey game room.");
     // The heading's gradient is painted only inside its box: the tail of
     // the g in "funkey" once fell outside it. Look for gold just under

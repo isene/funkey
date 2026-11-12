@@ -63,7 +63,7 @@ fn main() {
 
 ## The games
 
-Nineteen games come with the engine, and Doom below:
+Twenty games come with the engine, and Doom below:
 
 - `climb`: a small Jumpman-style platformer, 200 lines. Ladders, coins, blobs.
 - `jumpman`: a Jumpman Junior kind of game. Five levels of girders, ladders and ropes. Bombs to collect, bullets to jump, robots to dodge. A fall from too high is the end of you. Some bombs reveal ladders or take girders away. A title tune, a high score.
@@ -127,7 +127,7 @@ cargo build --release --target wasm32-unknown-unknown --features eliminator
 ```
 
 Play it at [d6gaming.org](https://d6gaming.org/The_Eliminator_game.html).
-Thirteen of them play in the [Game Room](https://isene.com/games/), with a
+Fourteen of them play in the [Game Room](https://isene.com/games/), with a
 top ten and comments under each; `room/` is that site, and `room/build.sh`
 builds its games. Six more play at [isene.org/fe2o3/try](https://isene.org/fe2o3/try/funkeys/).
 A page has one core, so there raid and soar cast the ground for every
@@ -191,7 +191,7 @@ writes the last frame. `DOOM_BENCH=1` times the renderer.
 The crate version is the engine's and moves only when the engine
 changes. Each game has its own version, shown on its title screen and
 tagged as `<game>-vX.Y`: `doom-v1.0`, `jumpman-v1.1`, `invaders-v1.0`,
-`drive-v1.0`, `soar-v1.1`, `climb-v1.0`, `castle-v1.1`, `gems-v1.3`, `salvo-v1.3`, `eliminator-v1.4`, `stack-v1.1`, `raid-v1.2`, `vector-v1.0`, `marble-v1.0`, `again-v1.2`, `kart-v1.3`, `chomp-v1.0`, `blocks-v0.4`, `wargame-v0.3`, `dust-v1.0`. The picker is `funkeys-v1.16`.
+`drive-v1.0`, `soar-v1.1`, `climb-v1.0`, `castle-v1.1`, `gems-v1.3`, `salvo-v1.3`, `eliminator-v1.4`, `stack-v1.1`, `raid-v1.2`, `vector-v1.0`, `marble-v1.0`, `again-v1.2`, `kart-v1.3`, `chomp-v1.0`, `blocks-v0.4`, `wargame-v0.3`, `dust-v1.0`, `bigger-v1.0`. The picker is `funkeys-v1.17`.
 
 ## Using it
 

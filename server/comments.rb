@@ -24,7 +24,7 @@ require "digest"
 require "json"
 
 DIR = ENV["FUNKEY_SCORES"] || File.expand_path("../../funkey-scores", File.dirname(File.realpath(__FILE__)))
-GAMES = %w[dust raid kart salvo wargame stack again marble chomp eliminator vector blocks jumpman].freeze
+GAMES = %w[bigger dust raid kart salvo wargame stack again marble chomp eliminator vector blocks jumpman].freeze
 KEEP = 300
 WAIT = 30
 CROWD = 1000

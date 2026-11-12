@@ -36,7 +36,7 @@ const RW: i32 = W * S;
 const RH: i32 = H * S;
 const GAME: &str = "bigger";
 /// The game's own version; the engine has its own.
-const VERSION: &str = "0.3";
+const VERSION: &str = "1.0";
 
 /// The pull of the giant the moon goes round: a round orbit 105 pixels
 /// out takes 68 pixels a second.
@@ -2232,7 +2232,10 @@ fn bigger() -> Bigger {
 
 /// `BIGGER_START`: 1 to 7 start at that size, 8 at the ending.
 fn start_at(game: &mut Bigger) {
-    let Some(n) = std::env::var("BIGGER_START").ok().and_then(|s| s.trim().parse::<u32>().ok()) else { return };
+    // A build for timing can carry the size in `BIGGER_BUILD_START`: a
+    // web page has no environment to read it from.
+    let named = std::env::var("BIGGER_START").ok().or(option_env!("BIGGER_BUILD_START").map(String::from));
+    let Some(n) = named.and_then(|s| s.trim().parse::<u32>().ok()) else { return };
     let size = match n { 2 => Size::Cell, 3 => Size::Fish, 4 => Size::Moon, 5 => Size::Star, 6 => Size::Pulsar, 7 | 8 => Size::Hole, _ => Size::Dot };
     game.begin(size);
     if n >= 8 { game.me.r = Size::Hole.goal_r(); }

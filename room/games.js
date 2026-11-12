@@ -17,8 +17,22 @@
   window.ROOM = {
     KINDS: ["Arcade", "Shooting", "Thinking", "Adventure", "Racing"],
     GAMES: {
+      bigger: {
+        kinds: ["Arcade"], v: "1.0", size: [480, 300], isnew: true,
+        line: "A dot eats dots. Then the picture pulls back.",
+        about: "Eat what is smaller than you and keep away from what is bigger. When you have grown enough, the picture pulls back, " +
+          "and the dot turns out to be a cell in a drop of pond water. The cell was inside a fish. The fish lived on a moon. " +
+          "Seven sizes, up to a black hole, and each moves its own way: the moon falls round a giant, stars pull at each other, " +
+          "a neutron star breaks rocks with its beam, and a black hole fades when it is not fed.",
+        alt: "bigger: a small orange fish among bigger fish and jellyfish in a blue sea, weed on the sand and light slanting down",
+        help: "The arrows steer. Eat the small, flee the big. As a moon, mind the gravity. " +
+          "As a neutron star, <kbd>←</kbd> <kbd>→</kbd> turn, <kbd>↑</kbd> pushes, and the beam breaks the big rocks into food. " +
+          "As a black hole, eat anything, and keep eating. <kbd>P</kbd> pauses.",
+        move: ARROWS,
+        keys: [K(" ", "Space", "start"), K("p", "P", "pause"), QUIT],
+      },
       dust: {
-        kinds: ["Adventure", "Arcade"], v: "1.0", size: [320, 180], isnew: true,
+        kinds: ["Adventure", "Arcade"], v: "1.0", size: [320, 180],
         line: "Dig down through caves where every grain falls, flows and burns.",
         about: "A descent through five kinds of cave, each drawn anew for every run. Every pixel is a grain that obeys its own rules: " +
           "sand heaps, water finds its level, oil floats and burns, acid eats rock, lava sets the wood alight and turns to stone in water. " +

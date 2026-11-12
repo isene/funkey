@@ -91,6 +91,11 @@ mod blocks;
 #[allow(dead_code)]
 mod wargame;
 
+#[cfg(feature = "bigger")]
+#[path = "../examples/bigger.rs"]
+#[allow(dead_code)]
+mod bigger;
+
 #[cfg(feature = "dust")]
 #[path = "../examples/dust.rs"]
 #[allow(dead_code)]
