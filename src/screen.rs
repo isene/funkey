@@ -8,8 +8,10 @@
 //!   down to fit.
 //! - Real pixels through the kitty graphics protocol, where the terminal
 //!   has it: the whole frame goes out every time and the terminal scales
-//!   it to the window. `FUNKEY_PIXELS=kitty` picks this. Inside glass the
-//!   pixels travel over shared memory; elsewhere as base64.
+//!   it to the window. Picked by itself in glass, kitty and WezTerm;
+//!   `FUNKEY_PIXELS=kitty` asks for it and `FUNKEY_PIXELS=blocks` for half
+//!   blocks. Inside glass the pixels travel over shared memory; elsewhere
+//!   as base64.
 
 use crate::frame::{parts, Frame, Rgb, BLACK};
 use crust::cursor::{seq, Cursor};
@@ -43,6 +45,16 @@ pub struct Screen {
     big: bool,
 }
 
+/// Does this terminal draw kitty graphics? glass, kitty and WezTerm do.
+/// tmux in between passes none of it on.
+pub fn shows_pixels() -> bool {
+    let set = |k: &str| std::env::var_os(k).is_some();
+    if set("TMUX") { return false; }
+    set("_GLASS_ID") || set("KITTY_WINDOW_ID")
+        || std::env::var("TERM").map(|t| t == "xterm-kitty").unwrap_or(false)
+        || std::env::var("TERM_PROGRAM").map(|t| t == "WezTerm").unwrap_or(false)
+}
+
 impl Screen {
     /// Take over the terminal: raw mode, the alternate screen, no cursor.
     pub fn open() -> Screen {
@@ -55,6 +67,8 @@ impl Screen {
             // On a console there is no protocol to speak, but the screen
             // is right there. Real pixels beat blocks every time.
             _ if glow::fb::there() => Backend::Screen,
+            // A terminal that shows pictures gets them without being asked.
+            _ if shows_pixels() => Backend::Kitty,
             _ => Backend::HalfBlocks,
         };
         let fb = if backend == Backend::Screen { glow::fb::Screen::open() } else { None };

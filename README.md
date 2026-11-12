@@ -6,7 +6,7 @@
 
 ![Rust](https://img.shields.io/badge/language-Rust-orange) ![Unlicense](https://img.shields.io/badge/license-Unlicense-green) ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-blue) ![Stay Amazing](https://img.shields.io/badge/Stay-Amazing-important)
 
-A game draws pixels into a frame and reads keys. funkey runs the loop at a fixed rate and shows the frame in the terminal. That is half blocks, or real pixels where the terminal has the kitty graphics protocol. Every cell holds two pixels in full colour, so a 160 by 50 terminal is a 160 by 100 pixel screen. Only the cells that changed are sent. Where a terminal can show real pixels, a later backend will. Part of the [Fe₂O₃ Rust terminal suite](https://github.com/isene/fe2o3).
+A game draws pixels into a frame and reads keys. funkey runs the loop at a fixed rate and shows the frame in the terminal. That is half blocks, or real pixels where the terminal has the kitty graphics protocol. Every cell holds two pixels in full colour, so a 160 by 50 terminal is a 160 by 100 pixel screen. Only the cells that changed are sent. Part of the [Fe₂O₃ Rust terminal suite](https://github.com/isene/fe2o3).
 
 The first game on it is `climb`, a Jumpman-style platformer:
 
@@ -200,7 +200,7 @@ tagged as `<game>-vX.Y`: `doom-v1.0`, `jumpman-v1.1`, `invaders-v1.0`,
 funkey = { version = "0.1", package = "fe2o3-funkey" }
 ```
 
-Set `FUNKEY_PIXELS=kitty` to draw real pixels through the kitty graphics protocol instead of half blocks, in a terminal that has it. Set `FUNKEY_SHOT=/tmp/shot.ppm` to have the engine write the frame to a file twice a second, for screenshots and tests. `FUNKEY_SOUND=0` keeps it quiet. `FUNKEY_SEED=7` gives the same random numbers on every run. `FUNKEY_KEYLOG=/tmp/keys.log` writes every key event the game receives, with its time, for a terminal where keys stick.
+In glass, kitty and WezTerm a game draws real pixels through the kitty graphics protocol by itself. Set `FUNKEY_PIXELS=blocks` for half blocks there, or `FUNKEY_PIXELS=kitty` to ask for pixels in another terminal that has the protocol. Set `FUNKEY_SHOT=/tmp/shot.ppm` to have the engine write the frame to a file twice a second, for screenshots and tests. `FUNKEY_SOUND=0` keeps it quiet. `FUNKEY_SEED=7` gives the same random numbers on every run. `FUNKEY_KEYLOG=/tmp/keys.log` writes every key event the game receives, with its time, for a terminal where keys stick.
 
 `FUNKEY_SCRIPT="right*60,space,-*30"` runs a game with no terminal, feeding those keys for that many ticks, and writes the last frame to `FUNKEY_SHOT`. With `FUNKEY_SHOT_EVERY=1` every frame is written; ffmpeg makes a film of them.
 
