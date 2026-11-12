@@ -7,6 +7,9 @@
 //! keep away from what is bigger. Seven sizes: a dot, a cell, a fish, a
 //! moon, a star, a neutron star and a black hole. Each moves its own way.
 //!
+//! The world is 480 by 300 units and the picture 960 by 600 pixels, so
+//! every shape is painted with four pixels to a unit.
+//!
 //! `BIGGER_START=<1 to 8>` starts at another size (8 is the ending);
 //! `BIGGER_BENCH=<frames>` plays that many frames with no terminal and
 //! prints the time one takes, and `BIGGER_SHOT=<file.ppm>` keeps the
@@ -21,9 +24,19 @@ const W: i32 = 480;
 const H: i32 = 300;
 const CX: f32 = 240.0;
 const CY: f32 = 150.0;
+/// The world is 480 by 300; the picture has this many pixels to each
+/// unit of it, each way.
+#[cfg(not(target_arch = "wasm32"))]
+const S: i32 = 2;
+/// A web page paints on one core, so there a unit is one pixel.
+#[cfg(target_arch = "wasm32")]
+const S: i32 = 1;
+const SF: f32 = S as f32;
+const RW: i32 = W * S;
+const RH: i32 = H * S;
 const GAME: &str = "bigger";
 /// The game's own version; the engine has its own.
-const VERSION: &str = "0.2";
+const VERSION: &str = "0.3";
 
 /// The pull of the giant the moon goes round: a round orbit 105 pixels
 /// out takes 68 pixels a second.
@@ -251,31 +264,77 @@ struct Bigger {
 
 fn smooth(t: f32) -> f32 { let t = t.clamp(0.0, 1.0); t * t * (3.0 - 2.0 * t) }
 
-/// Light added to what is there: a glow never darkens.
+/// One colour laid over another, worked out in whole numbers: quick
+/// enough to do for every pixel of a picture.
+#[inline]
+fn lay(under: Rgb, over: Rgb, a: f32) -> Rgb { lay_k(under, over, (a.clamp(0.0, 1.0) * 256.0) as u32) }
+
+/// The same, with the share of the upper colour as a count out of 256.
+#[inline]
+fn lay_k(under: Rgb, over: Rgb, k: u32) -> Rgb {
+    let rb = ((((under & 0xff00ff) * (256 - k)) >> 8) + (((over & 0xff00ff) * k) >> 8)) & 0xff00ff;
+    let g = ((((under & 0x00ff00) * (256 - k)) >> 8) + (((over & 0x00ff00) * k) >> 8)) & 0x00ff00;
+    rb | g
+}
+
+/// A colour with light added to it: light never darkens.
+#[inline]
+fn lit(under: Rgb, c: Rgb, k: f32) -> Rgb {
+    let k = (k.clamp(0.0, 4.0) * 256.0) as u32;
+    let ch = |sh: u32| (((under >> sh) & 255) + ((((c >> sh) & 255) * k) >> 8)).min(255) << sh;
+    ch(16) | ch(8) | ch(0)
+}
+
+/// Light added to one pixel of the picture.
 #[inline]
 fn add(f: &mut Frame, x: i32, y: i32, c: Rgb, k: f32) {
     if x < 0 || y < 0 || x >= f.w || y >= f.h || k <= 0.0 { return; }
-    let (r, g, b) = parts(c);
-    let (ur, ug, ub) = parts(f.px[(y * f.w + x) as usize]);
-    let up = |u: u8, v: u8| (u as f32 + v as f32 * k).min(255.0) as u8;
-    f.px[(y * f.w + x) as usize] = rgb(up(ur, r), up(ug, g), up(ub, b));
+    let i = (y * f.w + x) as usize;
+    f.px[i] = lit(f.px[i], c, k);
 }
+
+/// Paint every row of a picture, the rows shared out over the cores.
+fn rows(f: &mut Frame, paint: impl Fn(i32, &mut [Rgb]) + Sync) {
+    let w = f.w.max(1) as usize;
+    #[cfg(target_arch = "wasm32")]
+    for (y, row) in f.px.chunks_mut(w).enumerate() { paint(y as i32, row); }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let n = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).clamp(1, 8);
+        let per = (f.h.max(1) as usize).div_ceil(n);
+        std::thread::scope(|s| {
+            for (i, band) in f.px.chunks_mut(per * w).enumerate() {
+                let paint = &paint;
+                s.spawn(move || for (j, row) in band.chunks_mut(w).enumerate() { paint((i * per + j) as i32, row); });
+            }
+        });
+    }
+}
+
+// From here on a place and a size are given in the world's own units,
+// and each shape works out the pixels itself.
 
 /// A soft light round a point, strongest in the middle.
 fn glow(f: &mut Frame, cx: f32, cy: f32, r: f32, c: Rgb, k: f32) {
-    if r < 1.0 { return; }
+    let (cx, cy, r) = (cx * SF, cy * SF, r * SF);
+    if r < 1.0 || k <= 0.0 { return; }
     let (x0, x1) = (((cx - r) as i32).max(0), ((cx + r) as i32 + 1).min(f.w - 1));
     for y in ((cy - r) as i32).max(0)..=((cy + r) as i32 + 1).min(f.h - 1) {
+        let row = (y * f.w) as usize;
         for x in x0..=x1 {
             let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
             let d = (dx * dx + dy * dy).sqrt() / r;
-            if d < 1.0 { add(f, x, y, c, (1.0 - d) * (1.0 - d) * k); }
+            if d < 1.0 { let i = row + x as usize; f.px[i] = lit(f.px[i], c, (1.0 - d) * (1.0 - d) * k); }
         }
     }
 }
 
-/// A disc with a soft edge, laid over what is there.
+/// A fine point of light: a far star, a spark.
+fn spot(f: &mut Frame, x: f32, y: f32, c: Rgb, k: f32) { glow(f, x, y, 0.95, c, k * 1.5); }
+
+/// A disc with a crisp edge, laid over what is there.
 fn blend_disc(f: &mut Frame, cx: f32, cy: f32, r: f32, c: Rgb, a: f32) {
+    let (cx, cy, r) = (cx * SF, cy * SF, r * SF);
     let (x0, x1) = ((cx - r).floor() as i32, (cx + r).ceil() as i32);
     for y in (cy - r).floor() as i32..=(cy + r).ceil() as i32 {
         for x in x0..=x1 {
@@ -283,44 +342,119 @@ fn blend_disc(f: &mut Frame, cx: f32, cy: f32, r: f32, c: Rgb, a: f32) {
             let d = (dx * dx + dy * dy).sqrt();
             if d > r { continue; }
             let under = f.get(x, y);
-            f.put(x, y, mix(under, c, a * (r - d).min(1.0)));
+            f.put(x, y, lay(under, c, a * (r - d).min(1.0)));
         }
     }
 }
 
-/// A ball of rock lit from the upper left, with a few craters.
-fn ball(f: &mut Frame, cx: f32, cy: f32, r: f32, c: Rgb, a: f32, seed: i32) {
+/// A disc that fades out toward its edge: something out of focus.
+fn soft(f: &mut Frame, cx: f32, cy: f32, r: f32, c: Rgb, a: f32) {
+    let (cx, cy, r) = (cx * SF, cy * SF, r * SF);
+    let (x0, x1) = (((cx - r) as i32).max(0), ((cx + r) as i32 + 1).min(f.w - 1));
+    for y in ((cy - r) as i32).max(0)..=((cy + r) as i32 + 1).min(f.h - 1) {
+        let row = (y * f.w) as usize;
+        for x in x0..=x1 {
+            let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
+            let d = (dx * dx + dy * dy).sqrt() / r;
+            if d < 1.0 { let i = row + x as usize; f.px[i] = lay(f.px[i], c, a * smooth(1.0 - d)); }
+        }
+    }
+}
+
+/// A rock in space: a ball lit from the upper left, rough, with craters.
+fn rock(f: &mut Frame, cx: f32, cy: f32, r: f32, c: Rgb, a: f32, seed: i32) {
+    let (cx, cy, r) = (cx * SF, cy * SF, r * SF);
+    // Craters: where each is on the face, and how wide.
+    let n = if r < 7.0 { 0 } else { 2 + (seed.unsigned_abs() % 4) as i32 };
+    let pits: Vec<(f32, f32, f32)> = (0..n).map(|k| {
+        let (th, far) = (hash(k, seed, 81) * TAU, hash(k, seed, 82).sqrt() * 0.62);
+        (th.cos() * far * r, th.sin() * far * r, r * (0.13 + 0.2 * hash(k, seed, 83)))
+    }).collect();
     let (x0, x1) = ((cx - r).floor() as i32, (cx + r).ceil() as i32);
     for y in (cy - r).floor() as i32..=(cy + r).ceil() as i32 {
         for x in x0..=x1 {
             let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
             let d2 = dx * dx + dy * dy;
             if d2 > r * r { continue; }
-            let mut light = (0.78 - (dx + dy) / (r * 2.2)).clamp(0.2, 1.15);
-            if r > 4.0 { light *= 0.82 + 0.3 * noise(dx / r * 2.5 + seed as f32, dy / r * 2.5, 64, seed as u32); }
+            let (nx, ny) = (dx / r, dy / r);
+            let nz = (1.0 - nx * nx - ny * ny).max(0.0).sqrt();
+            let mut light = 0.1 + 1.05 * (nx * -0.52 + ny * -0.55 + nz * 0.65).max(0.0);
+            if r > 4.0 {
+                let rough = fbm(nx * 2.4 + seed as f32 * 0.37 + 40.0, ny * 2.4 + 40.0, 3, 84, 64);
+                light *= 0.7 + 0.6 * rough;
+            }
+            for &(px, py, pr) in &pits {
+                let (qx, qy) = (dx - px, dy - py);
+                let q = (qx * qx + qy * qy).sqrt() / pr;
+                // The wall away from the light is bright, the near one dark.
+                if q < 1.0 { light *= 0.72 + 0.4 * (qx + qy) / pr * smooth(q * 1.4); }
+                else if q < 1.25 { light *= 1.12; }
+            }
             let under = f.get(x, y);
-            f.put(x, y, mix(under, tint(c, light), a * (r - d2.sqrt()).min(1.0)));
+            f.put(x, y, lay(under, tint(c, light), a * (r - d2.sqrt()).min(1.0)));
+        }
+    }
+}
+
+/// A small world of sea, land, ice and cloud that turns, with thin air
+/// glowing round it.
+fn planet(f: &mut Frame, cx: f32, cy: f32, r: f32, a: f32, time: f32) {
+    glow(f, cx, cy, r * 1.9, 0x3c8cff, 0.32 * a);
+    let (cx, cy, r) = (cx * SF, cy * SF, r * SF);
+    let reach = r.ceil() as i32 + S;
+    for dy in -reach..=reach {
+        for dx in -reach..=reach {
+            let (fx, fy) = (dx as f32 + 0.5, dy as f32 + 0.5);
+            let d = (fx * fx + fy * fy).sqrt();
+            let (px, py) = (cx as i32 + dx, cy as i32 + dy);
+            if d > r {
+                let k = (1.0 - (d - r) / (1.6 * SF)).max(0.0);
+                add(f, px, py, 0x70b8ff, k * k * 0.7 * a);
+                continue;
+            }
+            let (nx, ny) = (fx / r, fy / r);
+            let nz = (1.0 - nx * nx - ny * ny).max(0.0).sqrt();
+            let (lon, lat) = (nx.atan2(nz) + time * 0.25, ny.asin());
+            let high = fbm(lon * 1.3 + 30.0, lat * 2.0 + 30.0, 4, 21, 64);
+            let mut c = if high > 0.52 {
+                lay(0x3c8a3c, 0x9a8250, ((high - 0.52) * 7.0).min(1.0))
+            } else {
+                lay(0x0c3c8c, 0x2c7cd0, (high / 0.52).powi(3))
+            };
+            if lat.abs() > 1.12 { c = lay(c, 0xf0f8ff, ((lat.abs() - 1.12) * 8.0).min(1.0)); }
+            let cloud = fbm(lon * 1.7 + time * 0.06 + 50.0, lat * 3.2 + 50.0, 3, 22, 64);
+            if cloud > 0.55 { c = lay(c, WHITE, ((cloud - 0.55) * 6.0).min(0.9)); }
+            let facing = (nx * -0.52 + ny * -0.55 + nz * 0.65).max(0.0);
+            let mut col = tint(c, 0.08 + 1.1 * facing);
+            // The sun glints on the sea.
+            if high <= 0.52 { col = lit(col, WHITE, facing.powi(24) * 0.6); }
+            let under = f.get(px, py);
+            f.put(px, py, lay(under, col, a * (r - d).min(1.0)));
         }
     }
 }
 
 /// A thin circle of light.
 fn circle_of_light(f: &mut Frame, cx: f32, cy: f32, r: f32, c: Rgb, k: f32) {
-    let n = ((r * TAU) as i32).clamp(8, 4000);
+    let (cx, cy, r) = (cx * SF, cy * SF, r * SF);
+    if r < 0.5 || k <= 0.0 { return; }
+    let n = ((r * TAU * 1.3) as i32).clamp(8, 9000);
     for i in 0..n {
         let a = i as f32 / n as f32 * TAU;
-        add(f, (cx + a.cos() * r) as i32, (cy + a.sin() * r) as i32, c, k);
+        let (ca, sa) = (a.cos(), a.sin());
+        add(f, (cx + ca * r) as i32, (cy + sa * r) as i32, c, k);
+        add(f, (cx + ca * (r + 1.0)) as i32, (cy + sa * (r + 1.0)) as i32, c, k * 0.5);
     }
 }
 
 /// Every pixel moved a little toward a colour: a slow swell of light.
 fn veil(f: &mut Frame, c: Rgb, a: f32) {
     if a <= 0.0 { return; }
-    for p in f.px.iter_mut() { *p = mix(*p, c, a); }
+    for p in f.px.iter_mut() { *p = lay(*p, c, a); }
 }
 
 /// Space is bent round a black hole: what lies behind it shows as a
-/// ring round the dark middle.
+/// ring round the dark middle. This one counts in pixels.
 fn lens(f: &mut Frame, cx: f32, cy: f32, r: f32) {
     let reach = (r * 3.4) as i32;
     let (bx, by) = (cx as i32 - reach, cy as i32 - reach);
@@ -345,7 +479,8 @@ fn lens(f: &mut Frame, cx: f32, cy: f32, r: f32) {
 /// that goes round it. The disc is seen nearly edge on. Its far half
 /// shows twice: flat behind the hole, and bent over the top and under
 /// the bottom of it, since the light from there curves round.
-fn hole(f: &mut Frame, x: f32, y: f32, r: f32, c: Rgb, turn: f32, a: f32) {
+fn hole(f: &mut Frame, wx: f32, wy: f32, wr: f32, c: Rgb, turn: f32, a: f32) {
+    let (x, y, r) = (wx * SF, wy * SF, wr * SF);
     lens(f, x, y, r);
     const TILT: f32 = 0.27;
     let (inner, outer) = (r * 1.45, r * 3.2);
@@ -357,7 +492,8 @@ fn hole(f: &mut Frame, x: f32, y: f32, r: f32, c: Rgb, turn: f32, a: f32) {
         let fast = noise(u + turn * 2.6, v, 16, 91);
         let slow = noise(u + turn * 1.3, v + 5.0, 16, 92);
         let fine = noise(u * 2.0 + turn * 4.0, v * 3.0, 32, 93);
-        (fast * (1.0 - p) + slow * p) * 0.75 + fine * 0.25
+        let hair = noise(u * 4.0 + turn * 7.0, v * 7.0, 64, 94);
+        (fast * (1.0 - p) + slow * p) * 0.65 + fine * 0.22 + hair * 0.13
     };
     let reach = outer.ceil() as i32;
     for dy in -reach..=reach {
@@ -378,8 +514,8 @@ fn hole(f: &mut Frame, x: f32, y: f32, r: f32, c: Rgb, turn: f32, a: f32) {
                 add(f, px, py, mix(hot, c, (d - r) / thick), k * streak * side * over * 2.0 * a);
                 // And right at the edge, a thin ring of light that has
                 // gone all the way round.
-                let ring = (1.0 - (d - r * 1.03).abs() / 1.2).max(0.0);
-                add(f, px, py, WHITE, ring * 0.9 * (r / 16.0).min(1.0) * a);
+                let ring = (1.0 - (d - r * 1.03).abs() / 1.6).max(0.0);
+                add(f, px, py, WHITE, ring * 0.9 * (wr / 14.0).min(1.0) * a);
             }
             // The disc itself, squeezed flat by the angle it is seen at.
             let (ex, ey) = (fx, fy / TILT);
@@ -397,7 +533,7 @@ fn hole(f: &mut Frame, x: f32, y: f32, r: f32, c: Rgb, turn: f32, a: f32) {
         }
     }
     // A soft light round it all.
-    glow(f, x, y, r * 4.2, c, 0.13 * a);
+    glow(f, wx, wy, wr * 4.2, c, 0.13 * a);
 }
 
 /// The old picture at a spot, also past its edges: there it is laid out
@@ -419,7 +555,7 @@ impl Bigger {
             high: funkey::scores::best(GAME), lives: 3, mode: Mode::Title,
             timer: 0.0, stage_t: 0.0, total_t: 0.0, time: 0.0,
             pull: Pull { t: 0.0, x: CX, y: CY, r: 3.0, with_me: false }, step: 0,
-            snap: Frame::new(W, H), sky: Frame::new(W, H), bits: Particles::new(),
+            snap: Frame::new(RW, RH), sky: Frame::new(RW, RH), bits: Particles::new(),
             pops: Vec::new(), rings: Vec::new(), trail: Vec::new(), shake: 0.0,
             rng: match std::env::var("FUNKEY_SEED").ok().and_then(|s| s.parse().ok()) { Some(s) => Rng::new(s), None => Rng::from_time() },
             audio: Audio::off(), snd: Sounds::new(),
@@ -1093,8 +1229,8 @@ impl Bigger {
         match self.view {
             View::Void | View::Stage(Size::Dot) => {
                 f.clear(BLACK);
-                for t in &self.things { f.circle(t.x as i32, t.y as i32, 2, WHITE); }
-                if with_me { f.circle(self.me.x as i32, self.me.y as i32, 3, WHITE); }
+                for t in &self.things { blend_disc(f, t.x, t.y, 2.0, WHITE, 1.0); }
+                if with_me { blend_disc(f, self.me.x, self.me.y, 3.0, WHITE, 1.0); }
             }
             View::Stage(Size::Cell) => self.pond(f, with_me),
             View::Stage(Size::Fish) => self.sea(f, with_me),
@@ -1105,19 +1241,23 @@ impl Bigger {
             View::Galaxy => galaxy(f, self.time),
             View::Web => web(f),
         }
-        // In the sea the bits are bubbles; elsewhere they are light.
-        let lit = !matches!(self.view, View::Stage(Size::Dot | Size::Fish) | View::Void);
         for p in &self.bits.list {
-            if lit {
-                add(f, p.x as i32, p.y as i32, p.color, (p.life * 2.0).min(1.0));
-                if p.size > 1 { glow(f, p.x, p.y, 3.0, p.color, 0.5 * (p.life * 2.0).min(1.0)); }
-            } else {
-                f.put(p.x as i32, p.y as i32, p.color);
+            let k = (p.life * 2.0).min(1.0);
+            match self.view {
+                View::Stage(Size::Dot) | View::Void => f.rect((p.x * SF) as i32, (p.y * SF) as i32, S, S, p.color),
+                // In the sea the bits are bubbles.
+                View::Stage(Size::Fish) => bubble(f, p.x, p.y, 0.7 + p.size as f32 * 0.5, k),
+                _ => {
+                    spot(f, p.x, p.y, p.color, k);
+                    if p.size > 1 { glow(f, p.x, p.y, 3.2, p.color, 0.5 * k); }
+                }
             }
         }
         for r in &self.rings {
             let k = r.t / r.life;
-            circle_of_light(f, r.x, r.y, 4.0 + r.reach * smooth(k), r.color, (1.0 - k) * 0.8);
+            let far = 4.0 + r.reach * smooth(k);
+            circle_of_light(f, r.x, r.y, far, r.color, (1.0 - k) * 0.8);
+            circle_of_light(f, r.x, r.y, far * 0.8, r.color, (1.0 - k) * 0.3);
         }
     }
 
@@ -1132,9 +1272,9 @@ impl Bigger {
     /// The stars' sky, with a slow twinkle.
     fn night(&self, f: &mut Frame) {
         f.px.copy_from_slice(&self.sky.px);
-        for i in 0..40 {
-            let (x, y) = ((hash(i, 0, 77) * W as f32) as i32, (hash(i, 1, 77) * H as f32) as i32);
-            add(f, x, y, WHITE, 0.35 + 0.35 * (self.time * (1.0 + hash(i, 2, 77) * 2.0) + i as f32).sin());
+        for i in 0..110 {
+            let (x, y) = (hash(i, 0, 77) * W as f32, hash(i, 1, 77) * H as f32);
+            spot(f, x, y, WHITE, 0.3 + 0.3 * (self.time * (1.0 + hash(i, 2, 77) * 2.0) + i as f32).sin());
         }
     }
 
@@ -1143,39 +1283,55 @@ impl Bigger {
         let n = self.trail.len();
         for (i, &(x, y)) in self.trail.iter().enumerate() {
             let k = i as f32 / n.max(1) as f32;
-            if wide > 1.5 { glow(f, x, y, wide * k, c, 0.12 * k); } else { add(f, x as i32, y as i32, c, 0.5 * k); }
+            if wide > 1.5 { glow(f, x, y, wide * k, c, 0.12 * k); } else { spot(f, x, y, c, 0.4 * k); }
         }
     }
 
-    /// A drop of pond water.
+    /// A drop of pond water under the microscope.
     fn pond(&self, f: &mut Frame, with_me: bool) {
         let t = self.time;
-        // The water's colour is worked out for every fourth pixel each
-        // way, and smoothed between.
-        let (gw, gh) = (W / 4 + 2, H / 4 + 2);
-        let grid: Vec<(f32, f32)> = (0..gw * gh).map(|i| {
-            let (x, y) = ((i % gw * 4) as f32, (i / gw * 4) as f32);
-            // Light from above, broken by the water's skin.
-            let lit = noise(x / 22.0 - t * 0.12, y / 22.0 + t * 0.09, 64, 8);
-            (noise(x / 60.0 + t * 0.04, y / 60.0, 64, 3), (lit - 0.62).max(0.0) * 0.5)
-        }).collect();
-        for y in (0..H).step_by(2) {
-            let (gy, v) = ((y / 4) as usize, (y % 4) as f32 / 4.0);
-            for x in (0..W).step_by(2) {
-                let (gx, u) = ((x / 4) as usize, (x % 4) as f32 / 4.0);
-                let at = |dx: usize, dy: usize| grid[(gy + dy) * gw as usize + gx + dx];
-                let (a, b, c, d) = (at(0, 0), at(1, 0), at(0, 1), at(1, 1));
-                let n = (a.0 * (1.0 - u) + b.0 * u) * (1.0 - v) + (c.0 * (1.0 - u) + d.0 * u) * v;
-                let lit = (a.1 * (1.0 - u) + b.1 * u) * (1.0 - v) + (c.1 * (1.0 - u) + d.1 * u) * v;
-                f.rect(x, y, 2, 2, mix(mix(0x052226, 0x0e4a42, n), 0x60e0b0, lit));
+        // The water is worked out for every second unit of the world
+        // each way, and smoothed up to the picture: light in water has
+        // no hard edges.
+        let g = 2 * S;
+        let mut water = Frame::new(W / 2 + 2, H / 2 + 2);
+        rows(&mut water, |y, row| {
+            let wy = (y * 2) as f32;
+            for (x, p) in row.iter_mut().enumerate() {
+                let wx = (x * 2) as f32;
+                let n = noise(wx / 60.0 + t * 0.04, wy / 60.0, 64, 3);
+                // Light from above is broken by the water's skin into
+                // two nets that slide over each other.
+                let a = (1.0 - (noise(wx / 27.0 - t * 0.12, wy / 27.0 + t * 0.09, 64, 8) - 0.5).abs() * 5.5).max(0.0);
+                let b = (1.0 - (noise(wx / 17.0 + t * 0.1, wy / 17.0 - t * 0.07, 64, 9) - 0.5).abs() * 5.5).max(0.0);
+                let net = a * a * 0.3 + a * b * 0.55;
+                // The glass darkens toward its edges.
+                let (ex, ey) = ((wx - CX) / CX, (wy - CY) / CY);
+                *p = lay(lit(lay(0x041c22, 0x0f5046, n), 0x70f0c0, net * 0.42), 0x01080a, (ex * ex + ey * ey) * 0.32);
             }
+        });
+        let (water, gw) = (&water.px, water.w as usize);
+        rows(f, |y, row| {
+            let (gy, kv) = ((y / g) as usize, (y % g * 256 / g) as u32);
+            for (x, p) in row.iter_mut().enumerate() {
+                let (gx, ku) = (x / g as usize, (x as i32 % g * 256 / g) as u32);
+                let i = gy * gw + gx;
+                *p = lay_k(lay_k(water[i], water[i + 1], ku), lay_k(water[i + gw], water[i + gw + 1], ku), kv);
+            }
+        });
+        // Far cells, out of focus.
+        for i in 0..12 {
+            let deep = 0.4 + hash(i, 2, 14) * 0.6;
+            let x = (hash(i, 0, 14) * W as f32 + t * 2.5 * deep).rem_euclid(W as f32 + 60.0) - 30.0;
+            let y = hash(i, 1, 14) * H as f32 + (t * 0.2 + i as f32).sin() * 6.0;
+            soft(f, x, y, 9.0 + hash(i, 3, 14) * 16.0, lay(0x1c7458, 0x4a8440, hash(i, 4, 14)), 0.2 * deep);
         }
         // Specks adrift, some near, some far.
-        for i in 0..90 {
+        for i in 0..170 {
             let deep = 0.3 + hash(i, 2, 13) * 0.7;
             let x = (hash(i, 0, 13) * W as f32 + t * 6.0 * deep).rem_euclid(W as f32);
             let y = (hash(i, 1, 13) * H as f32 + (t * 0.5 + i as f32).sin() * 4.0).rem_euclid(H as f32);
-            add(f, x as i32, y as i32, 0x80ffd0, 0.25 * deep);
+            spot(f, x, y, 0x80ffd0, 0.22 * deep);
         }
         for th in &self.things {
             let a = (th.age * 2.0).min(1.0);
@@ -1183,7 +1339,7 @@ impl Bigger {
             blob(f, th.x, th.y, th.r, c, a, t * 2.0 + th.phase, self.danger(th));
         }
         if with_me {
-            glow(f, self.me.x, self.me.y, self.me.r * 2.4, 0xffffa0, 0.35 * self.shown());
+            glow(f, self.me.x, self.me.y, self.me.r * 2.6, 0xffffa0, 0.32 * self.shown());
             blob(f, self.me.x, self.me.y, self.me.r, 0xfff8a0, self.shown(), t * 3.0, false);
         }
     }
@@ -1191,48 +1347,93 @@ impl Bigger {
     /// The sea, seen from the side.
     fn sea(&self, f: &mut Frame, with_me: bool) {
         let t = self.time;
-        // Light comes down in slanted, slowly moving bands. A band's
-        // strength is worked out once for each slanted line, not for
-        // each pixel.
-        let rays: Vec<f32> = (0..W + H).map(|i| (noise(i as f32 / 42.0 + t * 0.08, 0.5, 32, 5) - 0.52).max(0.0) * 0.6).collect();
-        for y in 0..H {
-            let deep = y as f32 / H as f32;
-            let c = mix(0x2488b8, 0x051634, deep);
-            for x in 0..W {
-                let lit = rays[(x + y * 3 / 5) as usize] * (1.0 - deep);
-                f.put(x, y, if lit > 0.0 { mix(c, 0xc0f0ff, lit) } else { c });
+        // Light comes down in slanted, slowly moving bands: wide ones
+        // and fine ones. A band's strength is worked out once for each
+        // slanted line, not for each pixel.
+        let rays: Vec<f32> = (0..RW + RH).map(|i| {
+            let u = i as f32 / SF;
+            (noise(u / 42.0 + t * 0.08, 0.5, 32, 5) - 0.5).max(0.0) * 0.75 + (noise(u / 10.0 - t * 0.06, 3.5, 64, 15) - 0.58).max(0.0) * 0.4
+        }).collect();
+        // For each column: where the surface is and how it glitters,
+        // the two rows of far hills, and the top of the sand.
+        let cols: Vec<(f32, f32, i32, i32, i32)> = (0..RW).map(|x| {
+            let wx = x as f32 / SF;
+            let surf = 3.0 + 2.5 * noise(wx / 9.0 + t * 0.8, t * 0.3, 64, 6) + 1.2 * (wx / 14.0 + t * 1.5).sin();
+            let glint = noise(wx / 3.0 + t * 1.4, t * 0.5, 64, 16);
+            let far = H as f32 - 44.0 - noise(wx / 95.0, 7.0, 64, 12) * 58.0 - noise(wx / 17.0, 7.0, 64, 12) * 6.0;
+            let near = H as f32 - 24.0 - noise(wx / 70.0, 3.0, 64, 11) * 40.0 - noise(wx / 11.0, 3.0, 64, 11) * 4.0;
+            let top = H as f32 - 12.0 - noise(wx / 36.0, 0.0, 64, 9) * 8.0;
+            (surf * SF, glint, (far * SF) as i32, (near * SF) as i32, (top * SF) as i32)
+        }).collect();
+        rows(f, |y, row| {
+            let deep = y as f32 / RH as f32;
+            let water = lay(0x2a90c0, 0x04122c, deep.powf(0.8));
+            let fade = (1.0 - deep) * (1.0 - deep);
+            let wy = y as f32 / SF;
+            for (x, p) in row.iter_mut().enumerate() {
+                let (surf, glint, far, near, top) = cols[x];
+                if (y as f32) < surf { *p = lay(0x58b8e4, 0xf0ffff, glint * glint); continue; }
+                let mut c = lit(water, 0xc0f0ff, rays[x + y as usize * 3 / 5] * fade);
+                // Right under the surface the water is bright.
+                let high = 1.0 - (y as f32 - surf) / (16.0 * SF);
+                if high > 0.0 { c = lit(c, 0x90e0ff, high * high * 0.4); }
+                if y >= far { c = lay(c, 0x0a2c48, 0.38); }
+                if y >= near { c = lay(c, 0x04122a, 0.55); }
+                if y >= top {
+                    // Sand: ripples, grains, and light that dances on it.
+                    let d = (y - top) as f32 / SF;
+                    let wx = x as f32 / SF;
+                    let ripple = 0.5 + 0.5 * (d * 1.6 + noise(wx / 12.0, 0.0, 64, 17) * 6.0).sin();
+                    let dance = (noise(wx / 9.0 + t * 0.35, wy / 4.0 - t * 0.2, 64, 18) - 0.55).max(0.0);
+                    c = lay(0xb09c68, 0x54462c, (d / 14.0 + hash(x as i32, y, 2) * 0.14 + ripple * 0.12).min(1.0));
+                    c = lit(c, 0xfff0c0, dance * 0.9);
+                    if d < 1.0 { c = lit(c, WHITE, 0.14); }
+                }
+                *p = c;
+            }
+        });
+        // A school of fish far off.
+        for i in 0..11 {
+            let way = if i % 3 == 0 { -1.0 } else { 1.0 };
+            let x = (hash(i, 0, 23) * W as f32 + way * t * (5.0 + hash(i, 2, 23) * 5.0)).rem_euclid(W as f32 + 40.0) - 20.0;
+            let y = 50.0 + hash(i, 1, 23) * 150.0 + (t * 0.4 + i as f32).sin() * 5.0;
+            fish(f, x, y, 2.5 + hash(i, 3, 23) * 2.5, way, 0x0a2c48, false, 0.4, t * 6.0 + i as f32);
+        }
+        // Weed that sways, each blade wide at the root and thin at the tip.
+        for i in 0..38 {
+            let plant = i / 2;
+            let wx = (hash(plant, 0, 19) * W as f32 + (i % 2) as f32 * 3.0).min(W as f32 - 1.0);
+            let x0 = (wx * SF) as i32;
+            let tall = ((26.0 + hash(i, 1, 19) * 74.0) * SF) as i32;
+            let root = cols[x0.clamp(0, RW - 1) as usize].4 + S;
+            let green = lay(0x14482c, 0x2c8850, hash(i, 2, 19));
+            for k in 0..tall {
+                let s = k as f32 / tall as f32;
+                let sway = ((t * 1.2 + plant as f32 + i as f32 * 0.4 + k as f32 * 0.035).sin() * k as f32 * 0.12) as i32;
+                let wide = 1 + ((1.0 - s) * 2.6) as i32;
+                let x = x0 + sway - wide / 2;
+                f.rect(x, root - k, wide, 1, tint(green, 0.7 + 0.5 * s));
+                f.put(x, root - k, tint(green, 0.5));
+                // Leaves, left and right in turn.
+                let step = 9 * S;
+                if k % step < 4 * S && k > step && wide > 1 {
+                    let out = (k % step) + 1;
+                    let side = if (k / step) % 2 == 0 { -1 } else { 1 };
+                    f.rect(x + if side < 0 { -out } else { wide }, root - k - out / 2, out, 1, tint(green, 1.15));
+                }
             }
         }
-        // The surface glitters.
-        for x in 0..W {
-            let k = noise(x as f32 / 9.0 + t * 0.8, t * 0.3, 64, 6);
-            f.vline(x, 0, 2 + (k * 3.0) as i32, mix(0x60c0e8, 0xe0ffff, k));
-        }
-        // Far hills, then weed that sways, then the sand.
-        for x in 0..W {
-            let hill = H - 26 - (noise(x as f32 / 70.0, 3.0, 64, 11) * 40.0) as i32;
-            for y in hill..H { let under = f.get(x, y); f.put(x, y, mix(under, 0x04122a, 0.45)); }
-        }
-        for i in 0..14 {
-            let x0 = hash(i, 0, 19) * W as f32;
-            let tall = 30.0 + hash(i, 1, 19) * 70.0;
-            for k in 0..tall as i32 {
-                let sway = ((t * 1.2 + i as f32 + k as f32 * 0.07).sin() * k as f32 * 0.12) as i32;
-                let x = x0 as i32 + sway;
-                let y = H - 14 - k;
-                f.put(x, y, 0x1c6040);
-                f.put(x + 1, y, 0x144830);
-                if k % 7 == 3 { f.put(x + 2, y, 0x2c8050); f.put(x - 1, y, 0x2c8050); }
-            }
-        }
-        for x in 0..W {
-            let top = H - 12 - (noise(x as f32 / 36.0, 0.0, 64, 9) * 8.0) as i32;
-            for y in top..H { f.put(x, y, mix(0x9a8858, 0x5a4c30, (y - top) as f32 / 14.0 + hash(x, y, 2) * 0.2)); }
+        // Bubbles on their way up.
+        for i in 0..26 {
+            let speed = 9.0 + hash(i, 2, 27) * 14.0;
+            let y = H as f32 - (t * speed + hash(i, 1, 27) * H as f32).rem_euclid(H as f32);
+            let x = hash(i, 0, 27) * W as f32 + (t * 1.5 + i as f32).sin() * 2.5;
+            bubble(f, x, y, 0.6 + hash(i, 3, 27) * 1.3, 0.55);
         }
         for th in &self.things {
             let a = (th.age * 2.0).min(1.0);
             if th.kind == Kind::Sting {
-                glow(f, th.x, th.y, th.r * 2.5, th.color, 0.25);
+                glow(f, th.x, th.y, th.r * 2.6, th.color, 0.22);
                 jelly(f, th.x, th.y, th.r, th.color, t * 3.0 + th.phase);
             } else {
                 let danger = self.danger(th);
@@ -1245,36 +1446,14 @@ impl Bigger {
     /// The giant, its rocks and the moon.
     fn space(&self, f: &mut Frame, with_me: bool) {
         self.night(f);
-        glow(f, CX, CY, GIANT * 1.9, 0xff9040, 0.35);
-        // The giant: bands of cloud that drift, a storm, and night on
-        // its lower right.
-        let r = GIANT as i32;
-        for dy in -r..=r {
-            let half = ((r * r - dy * dy) as f32).sqrt() as i32;
-            for dx in -half..=half {
-                // The clouds wrap round the ball: they crowd at its edge.
-                let u = (dx as f32 / (half as f32 + 0.5)).asin();
-                let band = noise(dy as f32 / 6.0, u * 2.2 + self.time * 0.05 * (1.0 + (dy as f32 * 0.3).sin()), 64, 4);
-                let mut c = mix(0xe0b070, 0x8a4c28, band);
-                let (sx, sy) = (u * 20.0 - 6.0, dy as f32 - 9.0);
-                if sx * sx / 30.0 + sy * sy / 9.0 < 1.0 { c = mix(c, 0xc04828, 0.7); }
-                let light = (0.85 - (dx + dy) as f32 / (GIANT * 2.2)).clamp(0.12, 1.1);
-                f.put(CX as i32 + dx, CY as i32 + dy, tint(c, light));
-            }
-        }
+        giant(f, self.time);
         if with_me { self.wake(f, 0x60b0ff, 1.0); }
         for t in &self.things {
             let a = (t.age * 2.0).min(1.0);
             let c = if self.danger(t) { mix(t.color, 0xd04030, 0.5) } else { t.color };
-            ball(f, t.x, t.y, t.r, c, a, (t.phase * 100.0) as i32);
+            rock(f, t.x, t.y, t.r, c, a, (t.phase * 100.0) as i32);
         }
-        if with_me {
-            let (x, y, r, a) = (self.me.x, self.me.y, self.me.r, self.shown());
-            glow(f, x, y, r * 2.2, 0x4090ff, 0.3 * a);
-            ball(f, x, y, r, 0x2c88d0, a, 1);
-            blend_disc(f, x - r * 0.2, y + r * 0.25, r * 0.38, 0x50b060, a * 0.85);
-            blend_disc(f, x + r * 0.3, y - r * 0.35, r * 0.25, 0xf0f8ff, a * 0.7);
-        }
+        if with_me { planet(f, self.me.x, self.me.y, self.me.r, self.shown(), self.time); }
     }
 
     /// A crowd of stars.
@@ -1293,7 +1472,8 @@ impl Bigger {
             star(f, x, y, r, 0xfff0a0, a, self.time);
             // The speck that goes round it used to be a whole game.
             let th = self.stage_t * 1.2;
-            add(f, (x + th.cos() * (r + 9.0)) as i32, (y + th.sin() * (r + 9.0)) as i32, 0xc0d8ff, a);
+            circle_of_light(f, x, y, r + 9.0, 0x8098c0, 0.1 * a);
+            spot(f, x + th.cos() * (r + 9.0), y + th.sin() * (r + 9.0), 0xc0d8ff, a);
         }
     }
 
@@ -1304,28 +1484,43 @@ impl Bigger {
         for t in &self.things {
             let a = (t.age * 2.0).min(1.0);
             let c = if self.danger(t) { mix(t.color, 0xd04030, 0.45) } else { t.color };
-            if t.heat > 0.0 { glow(f, t.x, t.y, t.r * 2.0, 0xff8030, t.heat.min(1.0) * 0.8); }
-            ball(f, t.x, t.y, t.r, mix(c, 0xffb050, t.heat.min(1.0) * 0.7), a, (t.phase * 100.0) as i32);
+            if t.heat > 0.0 { glow(f, t.x, t.y, t.r * 2.2, 0xff8030, t.heat.min(1.0) * 0.8); }
+            rock(f, t.x, t.y, t.r, mix(c, 0xffb050, t.heat.min(1.0) * 0.7), a, (t.phase * 100.0) as i32);
         }
         if with_me {
             let (x, y, r, a) = (self.me.x, self.me.y, self.me.r, self.shown());
             self.wake(f, 0x80c0ff, 4.0);
             let (bx, by) = (self.me.ang.cos(), self.me.ang.sin());
-            // The beam, both ways, thinning toward its ends.
+            // The lines of its field: loops from one pole to the other.
+            for (n, reach) in [2.4, 3.6, 5.0].into_iter().enumerate() {
+                let steps = (reach * r * 5.0) as i32;
+                for i in 1..steps {
+                    let th = i as f32 / steps as f32 * PI;
+                    let far = reach * r * th.sin() * th.sin();
+                    let (along, across) = (far * th.cos(), far * th.sin());
+                    let k = (0.2 - n as f32 * 0.04) * (0.7 + 0.3 * (self.time * 3.0 - th * 4.0 + n as f32).sin()) * a;
+                    for side in [-1.0, 1.0] {
+                        spot(f, x + bx * along - by * across * side, y + by * along + bx * across * side, 0x70b0ff, k);
+                    }
+                }
+            }
+            // The beam, both ways: a hot thread in a cone of light that
+            // widens and thins toward its ends.
             let mut far = r;
             while far < BEAM {
                 let k = 1.0 - far / BEAM;
                 let flicker = 0.75 + 0.25 * (self.time * 30.0 + far * 0.3).sin();
                 for way in [-1.0, 1.0] {
                     let (px, py) = (x + bx * far * way, y + by * far * way);
-                    add(f, px as i32, py as i32, 0xc0f0ff, k * flicker * a);
-                    glow(f, px, py, 2.0 + k * 3.0, 0x40a0ff, 0.35 * k * flicker * a);
+                    spot(f, px, py, 0xe0f8ff, k * flicker * a);
+                    glow(f, px, py, 1.6 + far * 0.045, 0x40a0ff, 0.3 * k * flicker * a);
                 }
-                far += 1.5;
+                far += 0.6;
             }
-            glow(f, x, y, r * 3.0, 0x60a0ff, 0.6 * a);
+            glow(f, x, y, r * 4.5, 0x4080ff, 0.35 * a);
+            glow(f, x, y, r * 2.2, 0xa0d0ff, 0.7 * a);
             blend_disc(f, x, y, r, 0xc8e4ff, a);
-            blend_disc(f, x, y, r * 0.6, WHITE, a);
+            blend_disc(f, x, y, r * 0.7, WHITE, a);
         }
     }
 
@@ -1347,73 +1542,88 @@ impl Bigger {
         let p = self.pull;
         let k = (p.t / PULL).clamp(0.0, 1.0);
         let e = smooth(k);
-        let r = COVER * (p.r / COVER).powf(e);
-        let (cx, cy) = (CX + (p.x - CX) * e, CY + (p.y - CY) * e);
+        let cover = COVER * SF;
+        let r = cover * (p.r / COVER).powf(e);
+        let (cx, cy) = ((CX + (p.x - CX) * e) * SF, (CY + (p.y - CY) * e) * SF);
         let fade = ((k - 0.82) / 0.18).clamp(0.0, 1.0);
-        let scale = COVER / r;
-        let (x0, x1) = (((cx - r).floor() as i32).max(0), ((cx + r).ceil() as i32).min(W - 1));
-        for y in ((cy - r).floor() as i32).max(0)..=((cy + r).ceil() as i32).min(H - 1) {
+        let scale = cover / r;
+        let (mx, my) = (CX * SF, CY * SF);
+        let (x0, x1) = (((cx - r).floor() as i32).max(0), ((cx + r).ceil() as i32).min(RW - 1));
+        let snap = &self.snap;
+        rows(f, |y, row| {
+            let dy = y as f32 + 0.5 - cy;
+            if dy.abs() > r { return; }
             for x in x0..=x1 {
-                let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
-                if dx * dx + dy * dy > r * r { continue; }
+                let dx = x as f32 + 0.5 - cx;
+                let d2 = dx * dx + dy * dy;
+                if d2 > r * r { continue; }
                 // A shrunken picture is the mean of four spots, or it
                 // would flicker as it goes.
                 let c = if scale < 1.5 {
-                    mirrored(&self.snap, CX + dx * scale, CY + dy * scale)
+                    mirrored(snap, mx + dx * scale, my + dy * scale)
                 } else {
                     let mut sum = (0u32, 0u32, 0u32);
                     for (ox, oy) in [(-0.25, -0.25), (0.25, -0.25), (-0.25, 0.25), (0.25, 0.25)] {
-                        let (r, g, b) = parts(mirrored(&self.snap, CX + (dx + ox) * scale, CY + (dy + oy) * scale));
-                        sum = (sum.0 + r as u32, sum.1 + g as u32, sum.2 + b as u32);
+                        let c = mirrored(snap, mx + (dx + ox) * scale, my + (dy + oy) * scale);
+                        sum = (sum.0 + (c >> 16 & 255), sum.1 + (c >> 8 & 255), sum.2 + (c & 255));
                     }
-                    rgb((sum.0 / 4) as u8, (sum.1 / 4) as u8, (sum.2 / 4) as u8)
+                    ((sum.0 / 4) << 16) | ((sum.1 / 4) << 8) | (sum.2 / 4)
                 };
                 // A pale rim, so that a dark picture shows against a dark one.
-                let rim = if r - (dx * dx + dy * dy).sqrt() < 1.5 { 0.4 } else { 0.0 };
-                let under = f.get(x, y);
-                f.put(x, y, mix(mix(c, WHITE, rim), under, fade));
+                let edge = r - d2.sqrt();
+                let rim = if edge < 1.5 * SF { 0.4 } else { 0.0 };
+                let i = x as usize;
+                row[i] = lay(lay(lay(c, WHITE, rim), row[i], fade), row[i], 1.0 - edge.min(1.0));
             }
-        }
+        });
     }
 
     /// Two lines of words low in the picture.
     fn say(&self, f: &mut Frame, a: &str, b: &str, show: f32) {
         if show <= 0.0 { return; }
         let k = show.min(1.0);
-        f.text_centered(W / 2 + 1, H - 61, a, BLACK, true, 2);
-        f.text_centered(W / 2, H - 62, a, mix(BLACK, WHITE, k), true, 2);
-        f.text_centered(W / 2 + 1, H - 37, b, BLACK, true, 1);
-        f.text_centered(W / 2, H - 38, b, mix(BLACK, 0xa0e0ff, k), true, 1);
+        f.text_centered(RW / 2 + S, (H - 61) * S + S, a, BLACK, true, 2 * S);
+        f.text_centered(RW / 2, (H - 62) * S, a, mix(BLACK, WHITE, k), true, 2 * S);
+        f.text_centered(RW / 2 + S, (H - 37) * S + 1, b, BLACK, true, S);
+        f.text_centered(RW / 2, (H - 38) * S, b, mix(BLACK, 0xa0e0ff, k), true, S);
     }
 
     fn hud(&self, f: &mut Frame) {
         // A dot has no score to look at. That comes with the cell.
         if self.size == Size::Dot { return; }
-        f.text_big(7, 6, &format!("{:06}", self.score), BLACK);
-        f.text_big(6, 5, &format!("{:06}", self.score), WHITE);
-        for k in 0..self.lives as i32 { f.circle(W - 10 - k * 11, 9, 4, BLACK); f.circle(W - 11 - k * 11, 8, 3, 0xff6060); }
+        let score = format!("{:06}", self.score);
+        f.text_scaled(7 * S, 6 * S, &score, BLACK, true, S);
+        f.text_scaled(6 * S, 5 * S, &score, WHITE, true, S);
+        for k in 0..self.lives as i32 {
+            let x = (W - 11 - k * 11) as f32;
+            blend_disc(f, x + 1.0, 9.0, 4.0, BLACK, 0.8);
+            blend_disc(f, x, 8.0, 3.2, 0xff6060, 1.0);
+            blend_disc(f, x - 1.0, 7.0, 1.0, 0xffc0c0, 1.0);
+        }
         let (from, to) = (self.size.start_r(), self.size.goal_r());
         let done = ((self.me.r - from) / (to - from)).clamp(0.0, 1.0);
         let name = self.size.name();
-        f.text_big(W / 2 - 52 - Frame::text_width(name, true, 1), 5, name, 0xc0c0d8);
-        f.rect(W / 2 - 46, 5, 94, 7, 0x202030);
-        f.rect(W / 2 - 45, 6, (92.0 * done) as i32, 5, mix(0x40c070, 0xffe060, done));
+        f.text_scaled((W / 2 - 52) * S - Frame::text_width(name, true, S), 5 * S, name, 0xc0c0d8, true, S);
+        f.rect((W / 2 - 46) * S, 5 * S, 94 * S, 7 * S, 0x202030);
+        f.rect((W / 2 - 45) * S, 6 * S, (92.0 * SF * done) as i32, 5 * S, mix(0x40c070, 0xffe060, done));
+        f.rect((W / 2 - 45) * S, 6 * S, (92.0 * SF * done) as i32, S, mix(0x90e0a0, 0xfff0a0, done));
         for p in &self.pops {
             let c = mix(0xffff80, 0xff8040, p.t);
-            f.text_centered(p.x as i32 + 1, p.y as i32 + 1, &p.text, BLACK, true, 1);
-            f.text_centered(p.x as i32, p.y as i32, &p.text, c, true, 1);
+            let (x, y) = ((p.x * SF) as i32, (p.y * SF) as i32);
+            f.text_centered(x + S, y + S, &p.text, BLACK, true, S);
+            f.text_centered(x, y, &p.text, c, true, S);
         }
     }
 
     fn title(&self, f: &mut Frame) {
         f.clear(BLACK);
-        f.text_centered(W / 2, 66, "BIGGER", WHITE, true, 6);
-        f.circle(W / 2, 148, 3, WHITE);
-        f.text_centered(W / 2, 172, "A GAME ABOUT A DOT", 0xa0a0b8, true, 1);
-        if (self.time * 2.0) as i32 % 2 == 0 { f.text_centered(W / 2, 208, "PRESS SPACE", WHITE, true, 2); }
-        f.text_centered(W / 2, 250, "ARROWS STEER  P PAUSES  Q QUITS", 0x707088, true, 1);
-        if self.high > 0 { f.text_centered(W / 2, 268, &format!("BEST {}", self.high), 0x707088, true, 1); }
-        f.text(W - 4 - Frame::text_width(VERSION, false, 1), H - 7, VERSION, 0x404050);
+        f.text_centered(RW / 2, 66 * S, "BIGGER", WHITE, true, 6 * S);
+        blend_disc(f, CX, 148.0, 3.0, WHITE, 1.0);
+        f.text_centered(RW / 2, 172 * S, "A GAME ABOUT A DOT", 0xa0a0b8, true, S);
+        if (self.time * 2.0) as i32 % 2 == 0 { f.text_centered(RW / 2, 208 * S, "PRESS SPACE", WHITE, true, 2 * S); }
+        f.text_centered(RW / 2, 250 * S, "ARROWS STEER  P PAUSES  Q QUITS", 0x707088, true, S);
+        if self.high > 0 { f.text_centered(RW / 2, 268 * S, &format!("BEST {}", self.high), 0x707088, true, S); }
+        f.text_scaled(RW - 4 * S - Frame::text_width(VERSION, false, S), (H - 7) * S, VERSION, 0x404050, false, S);
     }
 
     /// The end: the dot alone, then a bigger dot.
@@ -1423,133 +1633,362 @@ impl Bigger {
         // The big one rolls in from the right and stops on the small one.
         let k = smooth((t - 3.0) / 3.0);
         let bx = W as f32 + 100.0 - (W as f32 + 100.0 - CX - 45.0) * k;
-        if bx - 90.0 > CX + 3.0 || t < 3.0 { f.circle(CX as i32, CY as i32, 3, WHITE); }
-        if t >= 3.0 { f.circle(bx as i32, CY as i32, 90, WHITE); }
+        if bx - 90.0 > CX + 3.0 || t < 3.0 { blend_disc(f, CX, CY, 3.0, WHITE, 1.0); }
+        if t >= 3.0 { blend_disc(f, bx, CY, 90.0, WHITE, 1.0); }
         if t < 3.0 {
             self.say(f, "YOU ARE A DOT.", "", t - 0.6);
         } else if t > 6.6 {
-            f.text_centered(W / 2, H - 34, "THERE IS ALWAYS A BIGGER DOT.", WHITE, true, 2);
+            f.text_centered(RW / 2, (H - 34) * S, "THERE IS ALWAYS A BIGGER DOT.", WHITE, true, 2 * S);
         }
     }
 }
 
-/// A cell: a skin that wobbles, a soft body, a core and small parts.
+/// A bubble: a thin ring with a glint.
+fn bubble(f: &mut Frame, x: f32, y: f32, r: f32, a: f32) {
+    circle_of_light(f, x, y, r, 0xc0f0ff, 0.5 * a);
+    spot(f, x - r * 0.4, y - r * 0.4, WHITE, 0.6 * a);
+}
+
+/// A cell: a skin that wobbles, a grainy body you can see through, a
+/// core and small parts. A hunter bristles and has hairs that beat.
 #[allow(clippy::too_many_arguments)]
 fn blob(f: &mut Frame, x: f32, y: f32, r: f32, c: Rgb, a: f32, wob: f32, spiky: bool) {
-    let reach = (r * 1.25).ceil() as i32;
+    let (cx, cy, pr) = (x * SF, y * SF, r * SF);
+    let (bx, by) = (cx.floor() as i32, cy.floor() as i32);
+    let skin = lay(c, WHITE, 0.45);
+    let grainy = (c & 0xff) as f32;
+    let edge_at = |th: f32| {
+        let mut e = pr * (1.0 + 0.07 * (3.0 * th + wob).sin() + 0.05 * (5.0 * th - wob * 1.7).sin() + 0.02 * (9.0 * th + wob * 2.3).sin());
+        if spiky { e += pr * 0.12 * (11.0 * th + wob * 0.5).sin().max(0.0).powi(2); }
+        e
+    };
+    if spiky && r > 3.0 {
+        // Hairs round the skin.
+        for i in 0..26 {
+            let th = i as f32 / 26.0 * TAU;
+            let from = edge_at(th);
+            let long = pr * 0.24;
+            let mut far = 0.0;
+            while far < long {
+                let bend = (wob * 3.0 + i as f32 * 0.9).sin() * 0.35 * far / long;
+                add(f, (cx + (th + bend).cos() * (from + far)) as i32, (cy + (th + bend).sin() * (from + far)) as i32, skin, 0.5 * a * (1.0 - far / long));
+                far += 1.0;
+            }
+        }
+    }
+    // Where the skin is, for 256 ways out from the middle.
+    let mut skin_at = [0.0f32; 257];
+    for (i, e) in skin_at.iter_mut().enumerate() { *e = edge_at(i as f32 / 256.0 * TAU - PI); }
+    let reach = (pr * 1.25).ceil() as i32 + 1;
     for dy in -reach..=reach {
         for dx in -reach..=reach {
-            let d = ((dx * dx + dy * dy) as f32).sqrt();
-            let th = (dy as f32).atan2(dx as f32);
-            let mut edge = r * (1.0 + 0.07 * (3.0 * th + wob).sin() + 0.05 * (5.0 * th - wob * 1.7).sin());
-            // A hunter bristles.
-            if spiky { edge += r * 0.1 * (11.0 * th + wob * 0.5).sin().max(0.0); }
+            let (fx, fy) = ((bx + dx) as f32 + 0.5 - cx, (by + dy) as f32 + 0.5 - cy);
+            let d = (fx * fx + fy * fy).sqrt();
+            if d > pr * 1.25 { continue; }
+            let at = (fy.atan2(fx) + PI) / TAU * 256.0;
+            let (i, part) = ((at as usize).min(255), at.fract());
+            let edge = skin_at[i] * (1.0 - part) + skin_at[i + 1] * part;
             if d > edge { continue; }
             let k = d / edge;
-            let (px, py) = (x as i32 + dx, y as i32 + dy);
+            let (px, py) = (bx + dx, by + dy);
             let under = f.get(px, py);
-            let body = if k > 0.84 { mix(c, WHITE, 0.4) } else { tint(c, 0.5 + 0.4 * k) };
-            f.put(px, py, mix(under, body, a * if k > 0.84 { 0.95 } else { 0.72 } * (edge - d).min(1.0)));
+            // A bright skin, a dark line inside it, then the body.
+            let (mut col, al) = if k > 0.9 || edge - d < 1.6 {
+                (skin, 0.95)
+            } else if k > 0.82 {
+                (tint(c, 0.4), 0.8)
+            } else {
+                let grain = noise(fx / pr * 3.5 + grainy, fy / pr * 3.5 + wob * 0.05, 64, 61);
+                (tint(c, 0.4 + 0.3 * k + 0.3 * grain), 0.68)
+            };
+            // Light falls on it from the upper left.
+            let sheen = ((-fx - fy) / (pr * 1.41)).max(0.0) * k;
+            col = lit(col, WHITE, sheen * sheen * 0.4);
+            f.put(px, py, lay(under, col, a * al * (edge - d).min(1.0)));
         }
     }
     if r > 3.0 {
-        blend_disc(f, x + r * 0.15, y - r * 0.1, r * 0.36, tint(c, 0.28), 0.9 * a);
-        blend_disc(f, x + r * 0.1, y - r * 0.15, r * 0.14, mix(c, WHITE, 0.5), 0.8 * a);
+        // The core, with a core of its own.
+        soft(f, x + r * 0.15, y - r * 0.1, r * 0.46, tint(c, 0.2), 0.95 * a);
+        blend_disc(f, x + r * 0.15, y - r * 0.1, r * 0.3, tint(c, 0.3), 0.7 * a);
+        blend_disc(f, x + r * 0.09, y - r * 0.16, r * 0.11, lay(c, WHITE, 0.5), 0.85 * a);
     }
-    if r > 8.0 {
-        for i in 0..4 {
-            let th = i as f32 * 1.7 + wob * 0.2;
-            blend_disc(f, x + th.cos() * r * 0.6, y + th.sin() * r * 0.6, r * 0.1, mix(c, WHITE, 0.3), 0.6 * a);
+    if r > 5.0 {
+        let n = 4 + (r / 3.0) as i32;
+        for i in 0..n {
+            let th = i as f32 * 2.4 + wob * 0.15;
+            let far = r * (0.5 + 0.22 * hash(i, 7, 62));
+            let (ox, oy) = (x + th.cos() * far, y + th.sin() * far);
+            if i % 3 == 0 {
+                // A bubble of sap.
+                soft(f, ox, oy, r * 0.15, lay(c, WHITE, 0.7), 0.35 * a);
+                circle_of_light(f, ox, oy, r * 0.13, WHITE, 0.2 * a);
+            } else {
+                blend_disc(f, ox, oy, r * (0.06 + 0.04 * hash(i, 8, 62)), lay(c, WHITE, 0.3), 0.6 * a);
+            }
         }
     }
 }
 
-/// A fish looking the way `face` says. A dangerous one shows its teeth.
+/// A fish looking the way `face` says: a forked tail that swings, fins,
+/// scales, a gill and an eye. A dangerous one shows its teeth.
 #[allow(clippy::too_many_arguments)]
 fn fish(f: &mut Frame, x: f32, y: f32, r: f32, face: f32, c: Rgb, teeth: bool, a: f32, swim: f32) {
     let face = if face < 0.0 { -1.0 } else { 1.0 };
-    let (rx, ry) = (r * 1.35, r * 0.8);
-    let paint = |f: &mut Frame, px: i32, py: i32, c: Rgb| { let under = f.get(px, py); f.put(px, py, mix(under, c, a)); };
-    // The tail swings, and a fin stands on the back.
-    let tail = swim.sin() * r * 0.3;
-    let len = (r * 1.0).ceil() as i32;
-    for i in 0..len {
-        let half = (i as f32 * 0.85) as i32 + 1;
-        let tx = (x - face * (rx + i as f32 - 2.0)) as i32;
-        let lift = (tail * i as f32 / len.max(1) as f32) as i32;
-        for dy in -half..=half { paint(f, tx, y as i32 + dy + lift, tint(c, 0.75 - 0.2 * (dy.abs() as f32 / half as f32))); }
-    }
-    if r >= 5.0 {
-        for i in 0..(r * 0.9) as i32 {
-            let tall = (i as f32 * 0.6) as i32;
-            let fx = (x - face * (i as f32 - r * 0.3)) as i32;
-            for dy in 0..=tall { paint(f, fx, (y - ry) as i32 - dy + 2, tint(c, 0.7)); }
+    let (cx, cy, pr) = (x * SF, y * SF, r * SF);
+    let (bx, by) = (cx.floor() as i32, cy.floor() as i32);
+    let (rx, ry) = (pr * 1.35, pr * 0.8);
+    let swing = swim.sin() * pr * 0.35;
+    let tail_from = rx * 0.78;
+    let tail_len = pr * 1.15;
+    let fine = r >= 5.0;
+    let (x0, x1) = (-(rx + tail_len).ceil() as i32 - 1, rx.ceil() as i32 + 1);
+    let tall = (pr * 1.5).ceil() as i32;
+    for dy in -tall..=tall {
+        for lx in x0..=x1 {
+            // `u` runs along the fish, 1 at the nose; `v` runs down.
+            let (fxu, fy) = (lx as f32 + 0.5, (by + dy) as f32 + 0.5 - cy);
+            let (u, v) = (fxu / rx, fy / ry);
+            let px = bx + (fxu * face) as i32;
+            let py = by + dy;
+            let e = u * u + v * v;
+            let mut col = None;
+            let mut al = 1.0;
+            if e <= 1.0 {
+                // A dark back, a pale belly, and a line of light between.
+                let mut k = if v > 0.3 { lay(c, WHITE, (v - 0.3) * 0.85) } else { tint(c, 1.0 - v * 0.25) };
+                if v < -0.5 { k = tint(k, 0.75 + (v + 1.0) * 0.5); }
+                if fine {
+                    if u < 0.4 {
+                        let scale = ((fxu * 7.0 / pr).sin() * (fy * 9.0 / pr).cos()).abs();
+                        k = tint(k, 0.86 + 0.24 * scale);
+                    }
+                    if r >= 8.0 && ((u + 1.0) * 3.2).fract() < 0.28 && u < 0.4 && v < 0.35 { k = tint(k, 0.7); }
+                    // The gill: a dark arc behind the head.
+                    let gill = ((u - 0.18).powi(2) + v * v * 0.45).sqrt();
+                    if (gill - 0.3).abs() < 0.035 && u > 0.36 { k = tint(k, 0.6); }
+                    // The side fin, beating.
+                    let (qx, qy) = ((u - 0.12) / 0.26, (v - 0.32 - 0.06 * (swim * 0.7).sin()) / 0.2);
+                    if qx * qx + qy * qy < 1.0 { k = tint(c, 0.62 + 0.2 * (qx * 9.0).sin().abs()); }
+                    let sheen = (-((v + 0.45) / 0.16).powi(2)).exp();
+                    k = lit(k, WHITE, sheen * 0.22);
+                    // The mouth of one that bites.
+                    if teeth && u > 0.62 && (v - 0.28).abs() < (u - 0.62) * 0.5 { k = 0x280808; }
+                }
+                col = Some(k);
+                al = ((1.0 - e) * pr * 0.45).min(1.0);
+            } else if -fxu > tail_from && -fxu < tail_from + tail_len {
+                // The tail: it widens, swings, and is cut in at the end.
+                let s = (-fxu - tail_from) / tail_len;
+                let q = (fy - swing * s).abs();
+                let half = ry * (0.16 + 0.95 * s);
+                let cut = half * 0.5 * ((s - 0.5) / 0.5).max(0.0);
+                if q < half && q >= cut {
+                    let ray = 0.5 + 0.5 * (q / half * 14.0).cos();
+                    col = Some(tint(c, 0.62 + 0.2 * ray - 0.15 * s));
+                    al = (half - q).min(1.0) * if fine { 0.92 } else { 1.0 };
+                }
+            } else if fine && fy < 0.0 && u > -0.55 && u < 0.4 {
+                // The fin on the back, highest toward the tail.
+                let top = -ry * (1.0 - u * u).sqrt();
+                let s = (u + 0.55) / 0.95;
+                let high = ry * 0.62 * (s * PI).sin().powf(0.6) * (1.25 - s);
+                if fy > top - high {
+                    let ray = 0.5 + 0.5 * (fxu * 14.0 / pr + fy * 3.0 / pr).cos();
+                    col = Some(tint(c, 0.58 + 0.22 * ray));
+                    al = (fy - (top - high)).min(1.0) * 0.92;
+                }
+            } else if fine && fy > 0.0 && u > -0.35 && u < 0.05 {
+                // A small fin under the belly.
+                let low = ry * (1.0 - u * u).sqrt();
+                let s = (u + 0.35) / 0.4;
+                if fy < low + ry * 0.3 * (s * PI).sin() * (1.2 - s) { col = Some(tint(c, 0.6)); al = 0.9; }
+            }
+            if let Some(k) = col {
+                let under = f.get(px, py);
+                f.put(px, py, lay(under, k, a * al));
+            }
         }
     }
-    for dy in -(ry.ceil() as i32)..=ry.ceil() as i32 {
-        for dx in -(rx.ceil() as i32)..=rx.ceil() as i32 {
-            let (u, v) = (dx as f32 / rx, dy as f32 / ry);
-            if u * u + v * v > 1.0 { continue; }
-            // A light back, a pale belly, and stripes on a big one.
-            let mut col = if v > 0.35 { mix(c, WHITE, (v - 0.35) * 0.9) } else { tint(c, 1.05 - v * 0.3) };
-            if r >= 8.0 && ((u * face + 1.0) * 3.2).fract() < 0.28 && u * face < 0.45 { col = tint(col, 0.72); }
-            paint(f, (x + dx as f32) as i32, (y + dy as f32) as i32, col);
+    if a <= 0.5 { return; }
+    let (ex, ey) = (x + face * r * 1.35 * 0.58, y - r * 0.8 * 0.22);
+    if r >= 3.5 {
+        let e = (r * 0.17).max(0.8);
+        blend_disc(f, ex, ey, e + 0.5, 0xf8f8f0, 1.0);
+        blend_disc(f, ex + face * e * 0.25, ey, e * 0.62, if teeth { 0xc01010 } else { 0x101018 }, 1.0);
+        spot(f, ex - e * 0.3, ey - e * 0.35, WHITE, 0.8);
+    } else {
+        blend_disc(f, ex, ey, 0.6, BLACK, 1.0);
+    }
+    if teeth && r >= 5.0 {
+        // Teeth along both lips.
+        let n = (r * 0.5) as i32;
+        for i in 0..n {
+            let s = (i as f32 + 0.5) / n as f32;
+            let tx = x + face * r * 1.35 * (0.66 + 0.3 * s);
+            let gap = r * 0.8 * 0.36 * s * 0.5;
+            let size = (r * 0.045).max(0.4);
+            blend_disc(f, tx, y + r * 0.8 * 0.28 - gap, size, WHITE, 1.0);
+            blend_disc(f, tx, y + r * 0.8 * 0.28 + gap, size, WHITE, 1.0);
         }
-    }
-    let (ex, ey) = (x + face * rx * 0.58, y - ry * 0.22);
-    if r >= 5.0 && a > 0.5 {
-        let e = (r * 0.16).max(1.0);
-        blend_disc(f, ex, ey, e + 0.8, WHITE, 1.0);
-        blend_disc(f, ex + face * 0.5, ey, e * 0.6, if teeth { 0xc01010 } else { BLACK }, 1.0);
-    } else if a > 0.5 {
-        f.put(ex as i32, ey as i32, BLACK);
-    }
-    if teeth && r >= 6.0 && a > 0.5 {
-        for i in 0..4 { f.put((x + face * (rx - 1.0 - i as f32 * 2.0)) as i32, (y + ry * 0.35) as i32, WHITE); }
     }
 }
 
-/// A jellyfish: a bell that beats, and threads under it.
+/// A jellyfish: a bell you can see through that beats, ribs in it, a
+/// frilled hem, and long threads under it.
 fn jelly(f: &mut Frame, x: f32, y: f32, r: f32, c: Rgb, beat: f32) {
-    let wide = r * (1.0 + beat.sin() * 0.14);
-    for dy in -(r as i32)..=0 {
-        let half = (wide * (1.0 - (dy as f32 / r).powi(2)).max(0.0).sqrt()) as i32;
-        for dx in -half..=half {
-            let (px, py) = (x as i32 + dx, y as i32 + dy);
-            let under = f.get(px, py);
-            let rim = dx.abs() >= half - 1 || dy == -(r as i32);
-            f.put(px, py, mix(under, if rim { mix(c, WHITE, 0.5) } else { c }, 0.7));
+    let (cx, cy, pr) = (x * SF, y * SF, r * SF);
+    let (bx, by) = (cx.floor() as i32, cy.floor() as i32);
+    let wide = pr * (1.0 + beat.sin() * 0.14);
+    let tall = pr * (1.0 - beat.sin() * 0.08);
+    let pale = lay(c, WHITE, 0.55);
+    // The threads hang behind the bell.
+    for k in 0..9 {
+        let off = (k as f32 - 4.0) / 4.0;
+        let long = pr * (2.2 + 0.9 * hash(k, 3, 71));
+        let mut i = 0.0;
+        while i < long {
+            let s = i / long;
+            let sway = (beat * 0.5 + i * 0.09 + k as f32 * 1.3).sin() * (1.5 + s * pr * 0.3);
+            add(f, (cx + off * wide * 0.8 + sway) as i32, (cy + i) as i32, c, 0.55 * (1.0 - s));
+            i += 1.0;
         }
     }
-    for k in -3..=3 {
-        for i in 1..(r * 2.0) as i32 {
-            let sway = ((beat * 0.5 + i as f32 * 0.4 + k as f32).sin() * 1.6) as i32;
-            let (px, py) = (x as i32 + k * 2 + sway, y as i32 + i);
+    // Four frilled arms in the middle.
+    for k in 0..4 {
+        let off = (k as f32 - 1.5) * 0.16;
+        let long = pr * 1.5;
+        let mut i = 0.0;
+        while i < long {
+            let s = i / long;
+            let sway = (beat * 0.6 + i * 0.16 + k as f32 * 2.1).sin() * (1.0 + s * pr * 0.14);
+            let half = ((1.0 - s) * pr * 0.07) as i32 + 1;
+            for w in -half..=half { add(f, (cx + off * wide + sway) as i32 + w, (cy + i) as i32, pale, 0.3 * (1.0 - s)); }
+            i += 1.0;
+        }
+    }
+    let reach = wide.ceil() as i32 + 1;
+    for dy in -(tall.ceil() as i32) - 1..=(tall * 0.2) as i32 + 1 {
+        for dx in -reach..=reach {
+            let (fx, fy) = ((bx + dx) as f32 + 0.5 - cx, (by + dy) as f32 + 0.5 - cy);
+            let (u, v) = (fx / wide, fy / tall);
+            if u.abs() >= 1.0 { continue; }
+            let k = (u * u + v * v).sqrt();
+            // Above: a dome. Below: a hem in scallops.
+            let inside = if v <= 0.0 { k <= 1.0 } else { v < 0.17 * (0.35 + 0.65 * (u * 11.0).cos().abs()) * (1.0 - u * u).sqrt() };
+            if !inside { continue; }
+            let rib = (u.atan2(-v.min(0.0) + 0.25) * 5.5).cos().abs().powi(10);
+            let rim = k.min(1.0).powi(6);
+            let top = (-((u + 0.25).powi(2) + (v + 0.7).powi(2)) * 14.0).exp();
+            let col = lit(lay(c, pale, (rim * 0.8 + rib * 0.35).min(1.0)), WHITE, top * 0.5);
+            let al = (0.42 + 0.45 * rim + 0.15 * rib).min(0.95) * if v <= 0.0 { ((1.0 - k) * pr).min(1.0) } else { 1.0 };
+            let (px, py) = (bx + dx, by + dy);
             let under = f.get(px, py);
-            f.put(px, py, mix(under, c, 0.5 * (1.0 - i as f32 / (r * 2.0))));
+            f.put(px, py, lay(under, col, al));
+        }
+    }
+    // What glows inside it.
+    for k in [-1.0, 1.0] { soft(f, x + k * r * 0.26, y - r * 0.42, r * 0.2, pale, 0.5); }
+}
+
+/// The giant the moon goes round: bands of cloud that drift and curl, a
+/// storm, day on its upper left, and thin air at its rim.
+fn giant(f: &mut Frame, time: f32) {
+    glow(f, CX, CY, GIANT * 2.1, 0xff9040, 0.3);
+    let (cx, cy, r) = (CX * SF, CY * SF, GIANT * SF);
+    let reach = r as i32 + 3 * S;
+    let storm = -0.2 + 0.12 * (time * 0.05).sin();
+    for dy in -reach..=reach {
+        for dx in -reach..=reach {
+            let (fx, fy) = (dx as f32 + 0.5, dy as f32 + 0.5);
+            let d = (fx * fx + fy * fy).sqrt();
+            let (px, py) = (cx as i32 + dx, cy as i32 + dy);
+            if d > r {
+                let k = (1.0 - (d - r) / (2.5 * SF)).max(0.0);
+                add(f, px, py, 0xffb070, k * k * 0.55 * (0.4 - 0.6 * (fx + fy) / (d * 1.41)).clamp(0.0, 1.0));
+                continue;
+            }
+            let (nx, ny) = (fx / r, fy / r);
+            let nz = (1.0 - nx * nx - ny * ny).max(0.0).sqrt();
+            let (lon, lat) = (nx.atan2(nz), ny.asin());
+            // Each band drifts at its own speed, and their edges curl.
+            let flow = time * 0.05 * (1.0 + (lat * 7.0).sin());
+            let curl = fbm(lon * 1.6 + flow + 20.0, lat * 5.0 + 20.0, 3, 4, 64) - 0.5;
+            let band = 0.5 + 0.5 * ((lat + curl * 0.24) * 11.0).sin();
+            let fine = noise(lon * 6.0 + flow * 2.0 + 40.0, lat * 18.0 + 40.0, 64, 5);
+            let k = (band * 0.8 + fine * 0.25).clamp(0.0, 1.0);
+            let mut c = if k < 0.5 { lay(0x7a3c20, 0xc88850, k * 2.0) } else { lay(0xc88850, 0xf0d8a8, k * 2.0 - 1.0) };
+            // The storm: a red oval with a pale ring round it.
+            let (sx, sy) = ((lon - storm) / 0.36, (lat - 0.3) / 0.15);
+            let q = sx * sx + sy * sy;
+            if q < 1.0 {
+                let whirl = 0.5 + 0.5 * (q * 9.0 - sy.atan2(sx) * 2.0 - time * 0.4).sin();
+                c = lay(c, lay(0xb03818, 0xe07040, whirl), (1.0 - q).sqrt() * 0.9);
+            } else if q < 1.5 {
+                c = lay(c, 0xf8e0b8, (1.5 - q) * 0.8);
+            }
+            let facing = (nx * -0.52 + ny * -0.55 + nz * 0.65).max(0.0);
+            let col = tint(c, 0.05 + 1.15 * facing.powf(0.75));
+            let under = f.get(px, py);
+            f.put(px, py, lay(under, col, (r - d).min(1.0)));
         }
     }
 }
 
-/// A star: a wide glow, a hot ball, and four long rays that breathe.
+/// A star: a wide glow, a ball that seethes, flames round its rim, and
+/// eight rays that breathe.
 fn star(f: &mut Frame, x: f32, y: f32, r: f32, c: Rgb, a: f32, time: f32) {
-    glow(f, x, y, r * 3.2, c, 0.55 * a);
-    blend_disc(f, x, y, r, c, a);
-    blend_disc(f, x, y, r * 0.65, mix(c, WHITE, 0.75), a);
-    if r < 4.0 { return; }
-    let long = r * (2.2 + 0.3 * (time * 2.0).sin());
-    let mut far = r * 0.8;
-    while far < long {
-        let k = (1.0 - far / long) * 0.6 * a;
-        for (dx, dy) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] { add(f, (x + dx * far) as i32, (y + dy * far) as i32, c, k); }
-        far += 1.0;
+    glow(f, x, y, r * 3.4, c, 0.5 * a);
+    let (cx, cy, pr) = (x * SF, y * SF, r * SF);
+    let hot = lay(c, WHITE, 0.82);
+    if pr < 5.0 {
+        blend_disc(f, x, y, r, c, a);
+        blend_disc(f, x, y, r * 0.65, hot, a);
+        return;
+    }
+    let (bx, by) = (cx.floor() as i32, cy.floor() as i32);
+    let reach = (pr * 1.75).ceil() as i32;
+    for dy in -reach..=reach {
+        for dx in -reach..=reach {
+            let (fx, fy) = ((bx + dx) as f32 + 0.5 - cx, (by + dy) as f32 + 0.5 - cy);
+            let d = (fx * fx + fy * fy).sqrt();
+            let (px, py) = (bx + dx, by + dy);
+            if d < pr {
+                // Hot in the middle, its own colour at the rim, and
+                // grains that come and go.
+                let limb = (1.0 - d * d / (pr * pr)).sqrt();
+                let grain = noise(fx / pr * 5.0 + time * 0.25 + 9.0, fy / pr * 5.0 - time * 0.2 + 9.0, 64, 71);
+                let col = lay(c, hot, (limb * 0.95 + (grain - 0.5) * 0.55).clamp(0.0, 1.0));
+                let under = f.get(px, py);
+                f.put(px, py, lay(under, col, a * (pr - d).min(1.0)));
+            } else if d < pr * 1.75 {
+                let flame = noise(fy.atan2(fx) / TAU * 24.0 + 12.0, time * 0.6 - d / pr * 1.5, 24, 72);
+                let k = (1.0 - (d - pr) / (pr * 0.75 * (0.3 + flame))).max(0.0);
+                add(f, px, py, c, k * k * 0.9 * a);
+            }
+        }
+    }
+    let long = pr * (2.7 + 0.3 * (time * 2.0).sin());
+    for (ux, uy, len) in [(1.0, 0.0, 1.0), (-1.0, 0.0, 1.0), (0.0, 1.0, 1.0), (0.0, -1.0, 1.0),
+                          (0.707, 0.707, 0.55), (-0.707, 0.707, 0.55), (0.707, -0.707, 0.55), (-0.707, -0.707, 0.55f32)] {
+        let end = long * len;
+        let mut far = pr * 0.9;
+        while far < end {
+            let k = 1.0 - far / end;
+            let k = k * k * 0.75 * a;
+            let (qx, qy) = (cx + ux * far, cy + uy * far);
+            add(f, qx as i32, qy as i32, hot, k);
+            add(f, (qx - uy) as i32, (qy + ux) as i32, c, k * 0.4);
+            add(f, (qx + uy) as i32, (qy - ux) as i32, c, k * 0.4);
+            far += 1.0;
+        }
     }
 }
 
 /// The sky behind a size in space: clouds of gas in the size's own
-/// colours, and stars.
+/// colours with bright threads and dark dust in them, and stars.
 fn sky(size: Size) -> Frame {
-    let mut f = Frame::new(W, H);
+    let mut f = Frame::new(RW, RH);
     let (a, b, seed) = match size {
         Size::Moon => (0x101838, 0x301040, 41),
         Size::Star => (0x402070, 0x104060, 42),
@@ -1557,60 +1996,128 @@ fn sky(size: Size) -> Frame {
         Size::Hole => (0x502810, 0x281040, 44),
         _ => return f,
     };
-    for y in 0..H {
-        for x in 0..W {
-            let (u, v) = (x as f32 / 90.0, y as f32 / 90.0);
-            let mut gas = (fbm(u, v, 4, seed, 64) - 0.42).max(0.0) * 1.6;
-            let which = fbm(u + 7.0, v + 3.0, 3, seed + 9, 64);
+    rows(&mut f, |y, row| {
+        for (x, p) in row.iter_mut().enumerate() {
+            let (wx, wy) = (x as f32 / SF, y as f32 / SF);
+            let (u, v) = (wx / 90.0, wy / 90.0);
+            // The gas is pushed about by a second field: that gives it
+            // folds instead of plain blots.
+            let (qx, qy) = (fbm(u + 3.0, v + 9.0, 3, seed + 5, 64) - 0.5, fbm(u + 11.0, v + 2.0, 3, seed + 6, 64) - 0.5);
+            let (gu, gv) = (u + qx * 1.6, v + qy * 1.6);
+            let cloud = fbm(gu, gv, 5, seed, 64);
+            let mut gas = (cloud - 0.4).max(0.0) * 1.7;
+            let which = fbm(gu + 7.0, gv + 3.0, 3, seed + 9, 64);
             // What a burst star leaves is a ring of gas round the middle.
             if size == Size::Pulsar {
-                let d = ((x as f32 - CX).powi(2) + (y as f32 - CY).powi(2) * 1.6).sqrt();
-                gas = gas * 0.5 + (1.0 - ((d - 150.0) / 70.0).powi(2)).max(0.0) * fbm(u * 2.0, v * 2.0, 4, seed + 3, 64) * 0.9;
+                let d = ((wx - CX).powi(2) + (wy - CY).powi(2) * 1.6).sqrt();
+                gas = gas * 0.5 + (1.0 - ((d - 150.0) / 70.0).powi(2)).max(0.0) * fbm(gu * 2.0, gv * 2.0, 4, seed + 3, 64) * 0.9;
             }
-            f.put(x, y, mix(0x020208, mix(a, b, which), gas.min(1.0)));
+            let mut c = lay(0x020208, lay(a, b, which), gas.min(1.0));
+            // Bright threads where the gas folds.
+            let thread = (1.0 - (fbm(gu * 2.0 + 5.0, gv * 2.0 + 5.0, 4, seed + 11, 64) - 0.5).abs() * 9.0).max(0.0);
+            c = lit(c, lay(b, WHITE, 0.35), thread * thread * gas.min(1.0) * 0.55);
+            // Dust in front of it.
+            let dust = (fbm(u * 1.4 + 20.0 + qy, v * 1.4 + 20.0 + qx, 4, seed + 13, 64) - 0.55).max(0.0) * 3.0;
+            *p = lay(c, 0x010104, dust.min(0.8));
         }
-    }
-    let seed = seed as i32;
-    for i in 0..520 {
-        let (x, y) = ((hash(i, 0, seed as _) * W as f32) as i32, (hash(i, 1, seed as _) * H as f32) as i32);
-        let c = mix(0xa0c0ff, 0xffe0a0, hash(i, 3, seed as _));
-        add(&mut f, x, y, c, 0.2 + hash(i, 2, seed as _).powi(3) * 0.8);
-        if hash(i, 2, seed as _) > 0.93 { glow(&mut f, x as f32, y as f32, 3.0, c, 0.5); }
+    });
+    let mut rng = Rng::new(seed as u64);
+    for _ in 0..1700 {
+        let (x, y) = (rng.float() * W as f32, rng.float() * H as f32);
+        let bright = rng.float();
+        let c = lay(0xa0c0ff, 0xffe0a0, rng.float());
+        add(&mut f, (x * SF) as i32, (y * SF) as i32, c, 0.15 + bright.powi(3) * 0.7);
+        if bright > 0.9 { spot(&mut f, x, y, c, 0.5); }
+        if bright > 0.988 {
+            // The brightest have a glow and a small cross.
+            glow(&mut f, x, y, 3.5, c, 0.5);
+            for k in 1..7 * S {
+                let fade = 0.5 * (1.0 - k as f32 / (7 * S) as f32);
+                for (dx, dy) in [(k, 0), (-k, 0), (0, k), (0, -k)] { add(&mut f, (x * SF) as i32 + dx, (y * SF) as i32 + dy, c, fade); }
+            }
+        }
     }
     f
 }
 
-/// A spiral of stars, slowly turning.
+/// A spiral of stars, slowly turning: a warm heart, two blue arms with
+/// pink clouds and dark dust in them, and a haze of old stars between.
 fn galaxy(f: &mut Frame, time: f32) {
     f.clear(0x010104);
-    for i in 0..200 {
-        let (x, y) = ((hash(i, 0, 31) * W as f32) as i32, (hash(i, 1, 31) * H as f32) as i32);
-        f.put(x, y, tint(WHITE, 0.15 + hash(i, 2, 31) * 0.3));
+    // The same stars every time: the stream starts from the same seed.
+    let mut rng = Rng::new(33);
+    for _ in 0..900 {
+        let (x, y) = ((rng.float() * RW as f32) as i32, (rng.float() * RH as f32) as i32);
+        f.put(x, y, tint(WHITE, 0.1 + rng.float().powi(3) * 0.5));
     }
-    glow(f, CX, CY, 150.0, 0x304080, 0.5);
-    for i in 0..7000 {
-        let d = hash(i, 0, 33).powf(0.7) * 132.0;
-        let arm = (i % 2) as f32 * PI;
-        let th = arm + d / 33.0 + (hash(i, 1, 33) - 0.5) * (1.4 - d / 180.0) + time * 0.05;
-        let (x, y) = (CX + th.cos() * d, CY + th.sin() * d * 0.62);
-        let c = mix(0xfff0c0, 0x80a8ff, (d / 120.0).min(1.0));
-        add(f, x as i32, y as i32, c, 0.25 + hash(i, 2, 33) * 0.45);
+    glow(f, CX, CY, 190.0, 0x283870, 0.45);
+    const FLAT: f32 = 0.6;
+    let turn = time * 0.05;
+    // An arm winds outward: the angle grows with the log of the distance.
+    let wind = |d: f32| (1.0 + d / 14.0).ln() * 2.5;
+    for i in 0..34000 {
+        // Many near the middle, few far out.
+        let d = (-(1.0 - rng.float() * 0.97).ln() * 54.0).min(185.0);
+        let between = i % 4 == 0;
+        // Three numbers added lie mostly near their middle: an arm is
+        // dense along its spine and thins out to both sides.
+        let off = (rng.float() + rng.float() + rng.float() - 1.5) / 1.5;
+        let th = if between { rng.float() * TAU } else { (i % 2) as f32 * PI + wind(d) + off * (0.95 - d / 400.0) } + turn;
+        let (x, y) = (CX + th.cos() * d, CY + th.sin() * d * FLAT);
+        let young = rng.float();
+        let c = if between { 0xffe0b0 } else { lay(0xfff0c0, 0x88b0ff, (d / 90.0).min(1.0) * (0.5 + 0.5 * young)) };
+        let k = (0.12 + rng.float() * 0.42) * if between { 0.45 } else { 1.0 - off.abs() * 0.7 };
+        add(f, (x * SF) as i32, (y * SF) as i32, c, k);
+        if between { continue; }
+        // Pink clouds where stars are born, and the odd bright young star.
+        if i % 150 == 1 && d > 25.0 && off.abs() < 0.4 { glow(f, x, y, 2.0 + young * 2.5, 0xff4c80, 0.45); }
+        if i % 90 == 2 && d > 15.0 { spot(f, x, y, 0xd0e0ff, 0.5 + young * 0.4); }
     }
-    glow(f, CX, CY, 26.0, 0xfff4d0, 0.9);
+    // Dust lies along the inside of each arm.
+    for i in 0..2600 {
+        let d = 16.0 + rng.float() * 120.0;
+        let th = (i % 2) as f32 * PI + wind(d) - 0.3 + (rng.float() + rng.float() - 1.0) * 0.16 + turn;
+        soft(f, CX + th.cos() * d, CY + th.sin() * d * FLAT, 1.2 + rng.float() * 1.6, 0x010104, 0.3);
+    }
+    // The heart: old yellow stars in a ball.
+    for _ in 0..5000 {
+        let d = (rng.float() + rng.float() + rng.float()) / 3.0 * 44.0 * rng.float();
+        let th = rng.float() * TAU;
+        add(f, ((CX + th.cos() * d) * SF) as i32, ((CY + th.sin() * d * 0.8) * SF) as i32, 0xffe8b8, 0.2 + rng.float() * 0.3);
+    }
+    glow(f, CX, CY, 52.0, 0xffd8a0, 0.45);
+    glow(f, CX, CY, 16.0, 0xfff4d0, 0.9);
 }
 
-/// Galaxies in their thousands, strung along threads.
+/// Galaxies in their thousands, strung along threads, with crowds where
+/// the threads meet. It does not move, so it is painted once and kept.
 fn web(f: &mut Frame) {
-    f.clear(0x010103);
-    for i in 0..9000 {
-        let (x, y) = (hash(i, 0, 51) * W as f32, hash(i, 1, 51) * H as f32);
-        // Threads run where the noise crosses its middle.
-        let ridge = 1.0 - (fbm(x / 80.0, y / 80.0, 3, 52, 64) - 0.5).abs() * 5.0;
-        if ridge < hash(i, 2, 51) * 0.9 { continue; }
-        let c = mix(0x8090ff, 0xffd0a0, hash(i, 3, 51));
-        add(f, x as i32, y as i32, c, 0.3 + ridge.max(0.0) * 0.5);
-        if hash(i, 4, 51) > 0.985 { glow(f, x, y, 4.0, c, 0.6); }
-    }
+    static KEPT: std::sync::OnceLock<Frame> = std::sync::OnceLock::new();
+    let kept = KEPT.get_or_init(|| {
+        let mut f = Frame::new(RW, RH);
+        f.clear(0x010103);
+        let mut rng = Rng::new(51);
+        for _ in 0..90000 {
+            let (x, y) = (rng.float() * W as f32, rng.float() * H as f32);
+            // Threads run where the noise crosses its middle, and they
+            // are thick where a second field is high.
+            let ridge = 1.0 - (fbm(x / 85.0, y / 85.0, 4, 52, 64) - 0.5).abs() * 9.0;
+            let rich = fbm(x / 120.0 + 9.0, y / 120.0 + 4.0, 3, 53, 64);
+            let pick = rng.float();
+            if ridge < pick * 0.9 + 0.08 - (rich - 0.5) * 0.5 {
+                // Between the threads, a galaxy here and there.
+                if pick > 0.985 { add(&mut f, (x * SF) as i32, (y * SF) as i32, 0x8088b0, 0.3); }
+                continue;
+            }
+            let c = lay(0x8090ff, 0xffd0a0, rng.float());
+            add(&mut f, (x * SF) as i32, (y * SF) as i32, c, 0.2 + ridge.max(0.0) * 0.5);
+            let big = rng.float();
+            if big > 0.97 { spot(&mut f, x, y, c, 0.6); }
+            if big > 0.994 && ridge > 0.5 { glow(&mut f, x, y, 3.0 + rich * 5.0, c, 0.5); }
+        }
+        f
+    });
+    f.px.copy_from_slice(&kept.px);
 }
 
 impl Game for Bigger {
@@ -1635,10 +2142,11 @@ impl Game for Bigger {
                 self.scene(f, true);
                 // A bite makes the picture tremble for a moment.
                 if self.shake > 0.0 {
-                    let (sx, sy) = (((self.time * 61.0).sin() * 3.0 * self.shake / 0.35) as i32, ((self.time * 47.0).cos() * 3.0 * self.shake / 0.35) as i32);
+                    let far = 3.0 * SF * self.shake / 0.35;
+                    let (sx, sy) = (((self.time * 61.0).sin() * far) as i32, ((self.time * 47.0).cos() * far) as i32);
                     let old = f.px.clone();
-                    for y in 0..H { for x in 0..W {
-                        f.px[(y * W + x) as usize] = old[((y + sy).clamp(0, H - 1) * W + (x + sx).clamp(0, W - 1)) as usize];
+                    for y in 0..RH { for x in 0..RW {
+                        f.px[(y * RW + x) as usize] = old[((y + sy).clamp(0, RH - 1) * RW + (x + sx).clamp(0, RW - 1)) as usize];
                     } }
                 }
                 self.hud(f);
@@ -1674,7 +2182,7 @@ impl Game for Bigger {
                     let k = (t - NOVA_BANG) / (NOVA - NOVA_BANG);
                     for (lag, c) in [(0.0, 0xfff0c0), (0.08, 0xff9040), (0.16, 0x8060ff)] {
                         let reach = ((k - lag).max(0.0)).sqrt() * 420.0;
-                        for w in 0..5 { circle_of_light(f, self.me.x, self.me.y, reach - w as f32 * 1.5, c, (1.0 - k) * 0.6); }
+                        for w in 0..8 { circle_of_light(f, self.me.x, self.me.y, reach - w as f32, c, (1.0 - k) * 0.45); }
                     }
                     veil(f, 0xfff4e0, 0.8 * (1.0 - k * 2.2).max(0.0).powi(2));
                     let (a, b) = Size::Pulsar.lines();
@@ -1700,14 +2208,14 @@ impl Game for Bigger {
             Mode::Over => {
                 self.scene(f, false);
                 f.dim(0.4);
-                f.text_centered(W / 2, 84, "EATEN", 0xff6060, true, 5);
-                f.text_centered(W / 2, 150, &format!("YOU GOT AS FAR AS {}", self.size.name()), WHITE, true, 1);
-                f.text_centered(W / 2, 174, &format!("SCORE {}", self.score), WHITE, true, 2);
+                f.text_centered(RW / 2, 84 * S, "EATEN", 0xff6060, true, 5 * S);
+                f.text_centered(RW / 2, 150 * S, &format!("YOU GOT AS FAR AS {}", self.size.name()), WHITE, true, S);
+                f.text_centered(RW / 2, 174 * S, &format!("SCORE {}", self.score), WHITE, true, 2 * S);
             }
             Mode::Won => {
                 f.clear(WHITE);
-                f.text_centered(W / 2, 84, "THE END", BLACK, true, 5);
-                f.text_centered(W / 2, 156, &format!("SCORE {}", self.score), BLACK, true, 2);
+                f.text_centered(RW / 2, 84 * S, "THE END", BLACK, true, 5 * S);
+                f.text_centered(RW / 2, 156 * S, &format!("SCORE {}", self.score), BLACK, true, 2 * S);
             }
         }
     }
@@ -1732,7 +2240,7 @@ fn start_at(game: &mut Bigger) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
-    let cfg = Config { width: W, height: H, fps: 60 };
+    let cfg = Config { width: RW, height: RH, fps: 60 };
     if let Ok(n) = std::env::var("BIGGER_BENCH") {
         let mut game = Bigger::new();
         game.begin(Size::Dot);
@@ -1746,7 +2254,7 @@ fn main() {
 
 // In a web page: see web/ in this repo.
 #[cfg(target_arch = "wasm32")]
-funkey::web!(bigger(), Config { width: W, height: H, fps: 60 });
+funkey::web!(bigger(), Config { width: RW, height: RH, fps: 60 });
 
 #[cfg(test)]
 impl Bigger {
@@ -1943,13 +2451,13 @@ mod tests {
         // A third of the way, the black picture of the dot still covers
         // the middle.
         run_for(&mut g, PULL * 0.3, |_| false);
-        let mut f = Frame::new(W, H);
+        let mut f = Frame::new(RW, RH);
         g.draw(&mut f);
-        assert_eq!(f.get(CX as i32 + 30, CY as i32 - 45), BLACK);
+        assert_eq!(f.get((CX as i32 + 30) * S, (CY as i32 - 45) * S), BLACK);
         run_for(&mut g, PULL, |g| g.mode == Mode::Play);
         assert_eq!(g.mode, Mode::Play);
         g.draw(&mut f);
-        assert_ne!(f.get(CX as i32 + 30, CY as i32 - 45), BLACK);
+        assert_ne!(f.get((CX as i32 + 30) * S, (CY as i32 - 45) * S), BLACK);
     }
 
     #[test]
@@ -1959,14 +2467,14 @@ mod tests {
         g.me.r = Size::Hole.goal_r();
         run_for(&mut g, 60.0, |g| g.mode == Mode::End);
         assert_eq!(g.mode, Mode::End);
-        let mut f = Frame::new(W, H);
+        let mut f = Frame::new(RW, RH);
         run_for(&mut g, 1.0, |_| false);
         g.draw(&mut f);
-        assert_eq!(f.get(CX as i32, CY as i32), WHITE);
-        assert_eq!(f.get(CX as i32 + 60, CY as i32), BLACK);
+        assert_eq!(f.get(CX as i32 * S, CY as i32 * S), WHITE);
+        assert_eq!(f.get((CX as i32 + 60) * S, CY as i32 * S), BLACK);
         run_for(&mut g, 6.0, |_| false);
         g.draw(&mut f);
-        assert_eq!(f.get(CX as i32 + 60, CY as i32), WHITE);
+        assert_eq!(f.get((CX as i32 + 60) * S, CY as i32 * S), WHITE);
         run_for(&mut g, 5.0, |g| g.mode == Mode::Won);
         assert_eq!(g.mode, Mode::Won);
         assert!(g.score > 3000);
@@ -1982,7 +2490,7 @@ mod tests {
         g.bot = true;
         g.begin(Size::Dot);
         let input = Input::new();
-        let mut f = Frame::new(W, H);
+        let mut f = Frame::new(RW, RH);
         let mut log = String::new();
         let mut was = (g.mode, g.size);
         for i in 0..60 * 600 {
@@ -1992,7 +2500,9 @@ mod tests {
                 was = (g.mode, g.size);
                 log.push_str(&format!("f{:04} {:?} {:?}\n", i / 15, g.mode, g.size));
             }
-            if i % 15 == 0 {
+            // A picture four times a second while the size changes, and
+            // one every four seconds of play.
+            if i % if g.mode == Mode::Play { 240 } else { 15 } == 0 {
                 g.draw(&mut f);
                 let _ = std::fs::write(format!("{dir}/f{:04}.ppm", i / 15), f.to_ppm());
             }
