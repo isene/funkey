@@ -12,7 +12,7 @@ use crust::{Crust, Cursor, Input, Pane, Popup};
 use std::io::Write;
 use std::path::PathBuf;
 
-const VERSION: &str = "1.16";
+const VERSION: &str = "1.17";
 const PAGE: &str = "https://isene.org/funkey/";
 
 struct Game {
@@ -26,6 +26,13 @@ struct Game {
 }
 
 const GAMES: &[Game] = &[
+    Game {
+        name: "bigger",
+        kind: "A dot eats dots",
+        blurb: "Then the picture pulls back",
+        keys: "The arrows steer. P pauses, Q quits.\n\nEat what is smaller than you and keep away from what is bigger.\nWhen you have grown enough, the picture pulls back, and you turn\nout to be something else, in a world with rules of its own.\nThree sizes so far; more are on their way.",
+        shot: include_bytes!("../../docs/img/bigger.png"),
+    },
     Game {
         name: "dust",
         kind: "Falling-sand cave descent",
