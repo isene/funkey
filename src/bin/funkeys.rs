@@ -30,7 +30,7 @@ const GAMES: &[Game] = &[
         name: "bigger",
         kind: "A dot eats dots",
         blurb: "Then the picture pulls back",
-        keys: "The arrows steer. P pauses, Q quits.\n\nEat what is smaller than you and keep away from what is bigger.\nWhen you have grown enough, the picture pulls back, and you turn\nout to be something else, in a world with rules of its own.\nThree sizes so far; more are on their way.",
+        keys: "The arrows steer. P pauses, Q quits.\n\nEat what is smaller than you and keep away from what is bigger.\nWhen you have grown enough, the picture pulls back, and you turn\nout to be something else, in a world with rules of its own.\nSeven sizes: a dot, a cell, a fish, a moon, a star, a neutron star\nand a black hole.",
         shot: include_bytes!("../../docs/img/bigger.png"),
     },
     Game {
