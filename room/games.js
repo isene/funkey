@@ -18,7 +18,7 @@
     KINDS: ["Arcade", "Shooting", "Thinking", "Adventure", "Racing"],
     GAMES: {
       bigger: {
-        kinds: ["Arcade"], v: "1.0", size: [480, 300], isnew: true,
+        kinds: ["Arcade"], v: "1.1", size: [480, 300], isnew: true,
         line: "A dot eats dots. Then the picture pulls back.",
         about: "Eat what is smaller than you and keep away from what is bigger. When you have grown enough, the picture pulls back, " +
           "and the dot turns out to be a cell in a drop of pond water. The cell was inside a fish. The fish lived on a moon. " +

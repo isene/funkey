@@ -36,7 +36,7 @@ const RW: i32 = W * S;
 const RH: i32 = H * S;
 const GAME: &str = "bigger";
 /// The game's own version; the engine has its own.
-const VERSION: &str = "1.0";
+const VERSION: &str = "1.1";
 
 /// The pull of the giant the moon goes round: a round orbit 105 pixels
 /// out takes 68 pixels a second.
@@ -610,7 +610,7 @@ impl Bigger {
     /// A radius for a new thing: mostly food, sometimes a danger, always
     /// measured against the player as it is now.
     fn pick_r(&mut self, nth: usize) -> f32 {
-        let big = nth % 3 == 2;
+        let big = nth % 2 == 1;
         let k = if big { self.rng.range(1.3, 1.8) } else { self.rng.range(0.35, 0.8) };
         (self.me.r * k).clamp(2.0, 34.0)
     }
@@ -632,7 +632,7 @@ impl Bigger {
     }
 
     /// One new thing for the size being played. `nth` decides its sort,
-    /// so that two in three are food.
+    /// so that every second one is food.
     fn spawn(&mut self, nth: usize) -> Thing {
         let mut t = Thing { x: 0.0, y: 0.0, vx: 0.0, vy: 0.0, r: 2.0, kind: Kind::Plain, color: WHITE,
             phase: self.rng.range(0.0, TAU), age: 0.0, orbit: 0.0, angle: 0.0, turn: 0.0, heat: 0.0 };
@@ -658,7 +658,7 @@ impl Bigger {
                     t.color = 0xf080c0;
                 } else {
                     t.r = self.pick_r(nth);
-                    let speed = self.rng.range(27.0, 60.0);
+                    let speed = self.rng.range(34.0, 72.0);
                     t.x = if right { -t.r * 2.0 } else { W as f32 + t.r * 2.0 };
                     t.y = self.rng.range(30.0, H as f32 - 42.0);
                     t.vx = if right { speed } else { -speed };
@@ -677,12 +677,12 @@ impl Bigger {
             }
             Size::Star => {
                 t.r = self.pick_r(nth).min(30.0);
-                let speed = self.rng.range(14.0, 30.0);
+                let speed = self.rng.range(22.0, 42.0);
                 (t.x, t.y, t.vx, t.vy) = self.from_edge(t.r * 2.0, speed);
             }
             Size::Pulsar => {
                 t.r = self.pick_r(nth);
-                let speed = self.rng.range(18.0, 46.0);
+                let speed = self.rng.range(26.0, 62.0);
                 (t.x, t.y, t.vx, t.vy) = self.from_edge(t.r, speed);
                 t.color = *self.rng.pick(&[0x8880a0, 0x7090a0, 0xa08890, 0x9098b0]).unwrap_or(&WHITE);
             }
@@ -825,7 +825,7 @@ impl Bigger {
                 Size::Cell => {
                     // Small ones shy away, big ones come slowly closer,
                     // and the water jostles them all.
-                    let pull = if bigger { 24.0 } else if d < 68.0 { -33.0 } else { 0.0 };
+                    let pull = if bigger { 44.0 } else if d < 68.0 { -33.0 } else { 0.0 };
                     t.vx += (dx / d * pull + (time * 0.9 + t.phase).sin() * 9.0 - t.vx * 0.8) * dt;
                     t.vy += (dy / d * pull + (time * 0.7 + t.phase * 2.0).cos() * 9.0 - t.vy * 0.8) * dt;
                     t.x = (t.x + t.vx * dt).rem_euclid(wf);
@@ -836,9 +836,9 @@ impl Bigger {
                         t.x += (time * 1.3 + t.phase).sin() * 9.0 * dt;
                         t.y += t.vy * dt * (0.6 + 0.6 * (time * 2.0 + t.phase).sin().max(0.0));
                     } else {
-                        if bigger && d < 105.0 {
+                        if bigger && d < 165.0 {
                             // A big fish that sees the player goes for it.
-                            t.vy += (dy / d * 90.0 - t.vy * 2.0) * dt;
+                            t.vy += (dy / d * 160.0 - t.vy * 2.0) * dt;
                             if dx * t.vx > 0.0 { t.x += t.vx * 0.7 * dt; }
                         } else if !bigger && d < 60.0 {
                             t.vy += (-dy / d * 135.0 - t.vy * 2.0) * dt;
@@ -888,10 +888,10 @@ impl Bigger {
                         let way = if t.r > me.r { 1.0 } else { -1.0 };
                         // It bends its path a little, and never turns back:
                         // it crosses the picture and is gone.
-                        t.vx += dx / d * 7.0 * way * dt;
-                        t.vy += dy / d * 7.0 * way * dt;
+                        t.vx += dx / d * 14.0 * way * dt;
+                        t.vy += dy / d * 14.0 * way * dt;
                         let v = (t.vx * t.vx + t.vy * t.vy).sqrt();
-                        if v > 26.0 { t.vx *= 26.0 / v; t.vy *= 26.0 / v; }
+                        if v > 38.0 { t.vx *= 38.0 / v; t.vy *= 38.0 / v; }
                     } else {
                         // A star falls toward the hole, and round it.
                         let pull = HOLE_PULL * me.r * me.r / (d * d + 400.0);
@@ -987,7 +987,7 @@ impl Bigger {
             return;
         }
         // The meal's area, most of it, joins the player's.
-        let k = if t.kind == Kind::Rival { 0.3 } else { 0.62 };
+        let k = if t.kind == Kind::Rival { 0.3 } else { 0.5 };
         self.me.r = (self.me.r * self.me.r + t.r * t.r * k).sqrt().min(self.size.goal_r());
         if self.things.len() > self.size.crowd() { self.things.remove(i); } else { self.things[i] = self.spawn(i); }
     }
@@ -999,7 +999,7 @@ impl Bigger {
         self.rings.push(Ring { x: self.me.x, y: self.me.y, t: 0.0, life: 0.6, reach: 60.0, color: 0xff6060 });
         self.shake = 0.35;
         self.me.r = (self.me.r * 0.85).max(self.size.start_r());
-        self.me.safe = 2.5;
+        self.me.safe = 1.5;
         self.combo = 0;
         if self.size != Size::Moon {
             self.me.vx = -dx / d.max(0.1) * 180.0;
@@ -1016,7 +1016,7 @@ impl Bigger {
     /// The size is done: points, a life, and no more music for now.
     fn grown(&mut self) {
         self.score += 500 * self.size.n();
-        self.lives = (self.lives + 1).min(5);
+        self.lives = (self.lives + 1).min(3);
         self.audio.stop(1);
     }
 
@@ -1211,7 +1211,7 @@ impl Bigger {
             }
             Size::Hole => {
                 // It gives off a little of itself all the time.
-                self.me.r -= 0.15 * dt;
+                self.me.r -= 0.26 * dt;
                 if self.me.r < Size::Hole.start_r() * 0.75 {
                     self.bitten(0.0, 0.0, 1.0);
                     self.me.r = Size::Hole.start_r();
