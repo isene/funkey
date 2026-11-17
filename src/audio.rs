@@ -346,7 +346,13 @@ fn apply(voices: &mut Vec<Voice>, cmd: Cmd) {
     match cmd {
         Cmd::Play { s, vol, looped, channel } => {
             if channel != 0 { voices.retain(|v| v.channel != channel); }
-            if voices.len() >= VOICES { voices.remove(0); }
+            // Full: the oldest one-shot sound makes room. A loop or a
+            // numbered channel (the music, an engine) is never the one to go.
+            if voices.len() >= VOICES {
+                let old = voices.iter().position(|v| !v.looped && v.channel == 0)
+                    .or_else(|| voices.iter().position(|v| !v.looped)).unwrap_or(0);
+                voices.remove(old);
+            }
             voices.push(Voice { data: s.data, pos: 0.0, step: 1.0, vol, looped, channel });
         }
         Cmd::Stop(c) => voices.retain(|v| v.channel != c),
@@ -436,6 +442,18 @@ mod tests {
         assert!((t.notes[1].1 - 0.25).abs() < 1e-4);
         assert!((t.notes[2].1 - 1.0).abs() < 1e-4);
         assert!(t.render().secs() > 1.7);
+    }
+
+    #[test]
+    fn many_sounds_at_once_leave_the_music_playing() {
+        let boom = Sample::noise(0.2, 0.3);
+        let mut voices = Vec::new();
+        apply(&mut voices, Cmd::Play { s: Sample::tone(Wave::Square, 220.0, 1.0, 0.2), vol: 0.8, looped: true, channel: 1 });
+        apply(&mut voices, Cmd::Play { s: boom.clone(), vol: 1.0, looped: false, channel: 3 });
+        for _ in 0..40 { apply(&mut voices, Cmd::Play { s: boom.clone(), vol: 0.7, looped: false, channel: 0 }); }
+        assert_eq!(voices.len(), VOICES);
+        assert!(voices.iter().any(|v| v.channel == 1 && v.looped), "the music was pushed out");
+        assert!(voices.iter().any(|v| v.channel == 3), "the shot's channel was pushed out");
     }
 
     #[test]
