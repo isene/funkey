@@ -12,7 +12,7 @@
   const gap = K("", "");
   const ARROWS = [gap, K("ArrowUp", "↑"), gap, K("ArrowLeft", "←"), gap, K("ArrowRight", "→"), gap, K("ArrowDown", "↓"), gap];
   const QUIT = K("q", "Q", "quit");
-  const ENGINE = "0.9";
+  const ENGINE = "0.9.3";
 
   window.ROOM = {
     KINDS: ["Arcade", "Shooting", "Thinking", "Adventure", "Racing"],
