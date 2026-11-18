@@ -12,7 +12,7 @@ use crust::{Crust, Cursor, Input, Pane, Popup};
 use std::io::Write;
 use std::path::PathBuf;
 
-const VERSION: &str = "1.17";
+const VERSION: &str = "1.18";
 const PAGE: &str = "https://isene.org/funkey/";
 
 struct Game {
@@ -478,7 +478,8 @@ fn help_line(ui: &Ui) -> String {
             GAMES[ui.sel].name
         ));
     }
-    style::dim("←↓↑→ move · Enter plays it here · ? its keys · w the games' page · q quit")
+    let keys = style::dim("←↓↑→ move · Enter plays it here · ? its keys · w the games' page · q quit");
+    crust::with_version(&keys, Crust::terminal_size().0 as usize, "funkeys", VERSION)
 }
 
 // ─────────────────────────── running one ─────────────────────────────

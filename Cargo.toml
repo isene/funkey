@@ -17,7 +17,7 @@ default = ["term"]
 term = ["dep:crust", "dep:glow"]
 
 [dependencies]
-crust = { version = "0.1.62", path = "../crust", package = "fe2o3-crust", optional = true }
+crust = { version = "0.1.79", path = "../crust", package = "fe2o3-crust", optional = true }
 glow  = { version = "0.1.28", path = "../glow", package = "fe2o3-glow", optional = true }
 image = { version = "0.25", default-features = false, features = ["png"] }
 
